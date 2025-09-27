@@ -1,17 +1,12 @@
-# Python essentials
 __pycache__/
 *.pyc
 
-# Environment variables (if you add API keys later)
 .env
 
-# Your scraped data (privacy!)
 data/offers.csv
 data/*.csv
 data/*.json
 
-# macOS
 .DS_Store
 
-# IDE (if you use VS Code)
 .vscode/
