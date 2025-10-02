@@ -1,0 +1,35 @@
+{
+  "search_templates": {
+    "java_remote": {
+      "keywords": "java",
+      "location": "Argentina",
+      "time_posted": "1w",
+      "remote": true,
+      "max_results": 50
+    },
+    "developer, junior": {
+      "keywords": "developer",
+      "location": "Argentina",
+      "time_posted": "24",
+      "remote": false,
+      "experience_levels":[2], 
+      "max_results": 50
+    },
+    "software, junior": {                 
+      "keywords": "software",                         
+      "location": "Argentina",
+      "time_posted": "24",
+      "remote": false,
+      "experience_levels":[2], 
+      "max_results": 50
+    },
+    "python, junior": {
+      "keywords": "python",
+      "location": "Latin America",
+      "time_posted": "24h",
+      "remote": true,
+      "experience_levels":[2],
+      "max_results": 30
+    }
+  }
+}

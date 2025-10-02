@@ -49,7 +49,7 @@ class Jobscraper:
         
         jobs_data = []
         
-        for i, card in enumerate(job_cards[:100]):  # Changed back to 10 jobs
+        for i, card in enumerate(job_cards[:15]):  # Changed back to 10 jobs
             # REMOVED: print(f"\n--- JOB {i+1} ---")  # Don't print during extraction
             
             job = {}
@@ -172,27 +172,84 @@ class Jobscraper:
         
         return jobs_data
     
+    def build_linkedin_search_url(self, search_config):
+        """Converts friendly params to LinkedIn query parameters"""
+    
+        base_url = "https://www.linkedin.com/jobs/search/"
+        query_params = []
+        
+        # 1. Keywords
+        if 'keywords' in search_config and search_config['keywords']:
+            keywords = search_config['keywords'].strip()
+            query_params.append(f"keywords={requests.utils.quote(keywords)}")
+    
+        # 2. Location
+        if 'location' in search_config and search_config['location']:
+            location = search_config['location'].strip()
+            query_params.append(f"location={requests.utils.quote(location)}")
+    
+        # 3. Time Posted
+        if 'time_posted' in search_config and search_config['time_posted']:
+            time_posted = search_config['time_posted'].strip()
+            time_mapping = {
+                '24h': 'r86400',
+                '1w': 'r604800',
+                '1m': 'r2592000'
+            }
+            if time_posted in time_mapping:
+                query_params.append(f"f_TPR={time_mapping[time_posted]}")
+    
+        # 4. Remote/On-site
+        if 'remote' in search_config:
+            remote = search_config['remote']
+            if isinstance(remote, bool):
+                if remote:
+                    query_params.append("f_WT=2")  # Remote work
+                # Note: LinkedIn doesn't have a specific "on-site only" filter
+    
+        # Combine base URL with query parameters
+        if query_params:
+            return f"{base_url}?{'&'.join(query_params)}"
+        else:
+            return base_url
+    
 if __name__ == "__main__":
     scraper = Jobscraper()
     
-    test_url = "https://www.linkedin.com/jobs/search/?currentJobId=4306643195&f_TPR=r86400&keywords=java%20junior&origin=JOB_SEARCH_PAGE_JOB_FILTER"
-    soup = scraper.test_connection(test_url)    
+    # Define search configuration - SIMPLIFIED
+    search_config = {
+        'keywords': 'java',
+        'location': 'España', 
+        'time_posted': '24h',
+        'remote': False
+    }
     
-    # Extract jobs focusing on visible card information
-    jobs = scraper.extract_linkedin_jobs(soup)
-    
-    # Show summary - ONLY print here
-    print(f"\n📊 EXTRACTION RESULTS")
-    print("="*50)
-    print(f"Total jobs extracted: {len(jobs)}")
+    # Build URL using the new method
+    search_url = scraper.build_linkedin_search_url(search_config)
+    print(f"🔍 Generated Search URL: {search_url}")
     print()
     
-    for i, job in enumerate(jobs):
-        print(f"--- JOB {i+1} ---")
-        print(f"📋 Title: {job.get('title', 'N/A')}")
-        print(f"🏢 Company: {job.get('company', 'N/A')}")
-        print(f"📍 Location: {job.get('location', 'N/A')}")
-        print(f"🏠 Work Mode: {job.get('work_modality', 'N/A')}")
-        print(f"📅 Posted: {job.get('posted_date', 'N/A')}")
-        print(f"🔗 URL: {job.get('job_url', 'N/A')}")
-        print("-" * 30)
+    # Test connection with the generated URL
+    soup = scraper.test_connection(search_url)    
+    
+    if soup:
+        # Extract jobs focusing on visible card information
+        jobs = scraper.extract_linkedin_jobs(soup)
+        
+        # Show summary
+        print(f"\n📊 EXTRACTION RESULTS")
+        print("="*50)
+        print(f"Total jobs extracted: {len(jobs)}")
+        print()
+        
+        for i, job in enumerate(jobs):
+            print(f"--- JOB {i+1} ---")
+            print(f"📋 Title: {job.get('title', 'N/A')}")
+            print(f"🏢 Company: {job.get('company', 'N/A')}")
+            print(f"📍 Location: {job.get('location', 'N/A')}")
+            print(f"🏠 Work Mode: {job.get('work_modality', 'N/A')}")
+            print(f"📅 Posted: {job.get('posted_date', 'N/A')}")
+            print(f"🔗 URL: {job.get('job_url', 'N/A')}")
+            print("-" * 30)
+    else:
+        print("❌ Failed to connect to LinkedIn")
