@@ -25,7 +25,9 @@ class LinkedInExtractor:
         return jobs
     
     def _extract_single_job(self, card):
-        """Extract data from a single job card"""
+        
+        
+        
         job = {}
         
         # Title
@@ -38,11 +40,10 @@ class LinkedInExtractor:
         if company_element:
             job['company'] = company_element.get_text().strip()
         
-        # Location and work modality
-        location_data = self._extract_location_and_work_mode(card)
-        job.update(location_data)
+        location = self._extract_location(card)
+        job['location'] = location
         
-        # Posted date
+        
         posted_date = self._extract_posted_date(card)
         if posted_date:
             job['posted_date'] = posted_date
@@ -54,62 +55,15 @@ class LinkedInExtractor:
         
         return job
     
-    def _extract_location_and_work_mode(self, card):
-        """Extract location and work modality from job card"""
-        all_text_elements = card.find_all(string=lambda text: 
-            text and len(text.strip()) > 5
-        )
+    def _extract_location(self, card):
         
-        location_found = False
-        result = {}
+        location_element = card.find('span', class_='job-search-card__location')
         
-        # Look for text with work mode keywords in parentheses
-        for text in all_text_elements:
-            text_clean = text.strip()
-            
-            if '(' in text_clean and ')' in text_clean and len(text_clean) < 100:
-                parentheses_content = text_clean.split('(')[1].split(')')[0].strip().lower()
-                
-                work_mode_keywords = {
-                    'remoto': 'Remote', 'remote': 'Remote', 
-                    'híbrido': 'Hybrid', 'hibrido': 'Hybrid', 'hybrid': 'Hybrid',
-                    'presencial': 'On-site', 'onsite': 'On-site', 'on-site': 'On-site',
-                    'en remoto': 'Remote', 'en presencial': 'On-site'
-                }
-                
-                found_mode = None
-                for keyword, mode in work_mode_keywords.items():
-                    if keyword in parentheses_content:
-                        found_mode = mode
-                        break
-                
-                if found_mode:
-                    location_part = text_clean.split('(')[0].strip()
-                    if ',' in location_part or any(indicator in location_part.lower() for indicator in ['ca', 'ny', 'tx', 'va', 'argentina']):
-                        result['location'] = location_part
-                        result['work_modality'] = found_mode
-                        location_found = True
-                        break
-        
-        # Look for regular location if no work mode found
-        if not location_found:
-            for text in all_text_elements:
-                text_clean = text.strip()
-                if len(text_clean) < 50 and (',' in text_clean or 'united states' in text_clean.lower()):
-                    location_indicators = [', ca', ', ny', ', tx', ', va', ', fl', ', wa', 'united states', 'argentina']
-                    if any(indicator in text_clean.lower() for indicator in location_indicators):
-                        result['location'] = text_clean
-                        result['work_modality'] = 'Not specified'
-                        location_found = True
-                        break
-        
-        # Set defaults
-        if 'location' not in result:
-            result['location'] = 'Not specified'
-        if 'work_modality' not in result:
-            result['work_modality'] = 'Not specified'
-        
-        return result
+        if location_element:
+            location_text = location_element.get_text().strip()
+            return location_text
+        else:
+            return 'Not found'
     
     def _extract_posted_date(self, card):
         """Extract posted date from job card"""

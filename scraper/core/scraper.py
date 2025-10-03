@@ -66,7 +66,6 @@ class JobScraper:
             print(f"📋 Title: {job.title}")
             print(f"🏢 Company: {job.company}")
             print(f"📍 Location: {job.location}")
-            print(f"🏠 Work Mode: {job.work_modality}")
             print(f"📅 Posted: {job.posted_date}")
             print(f"🔗 URL: {job.job_url}")
             print("-" * 30)

@@ -68,7 +68,7 @@ def multiple_search():
         jobs = scraper.search_jobs(search_config, save_results=True)
         total_jobs += len(jobs)
         
-        print(f"{jobs} jobs found")
+        print(f"{len(jobs)} jobs found")
         
     print(f"Multiple search completed. {total_jobs} jobs found and saved.")
 

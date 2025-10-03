@@ -65,7 +65,7 @@ DEFAULT_PROCESSING_LIMIT = 100
 
 SEARCH_TEMPLATES = [
     {
-        "name": "Java Junior Argentina 24hs",
+        "name": "Java Junior Argentina 24hs remoto",
         "keywords": "Java",
         "location": "Argentina",
         "experience_levels": [2],

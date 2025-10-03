@@ -66,7 +66,6 @@ class JSONStorage:
             "title": job.title,
             "company": job.company,
             "location": job.location,
-            "work_modality": job.work_modality,
             "posted_date": job.posted_date,
             "job_url": job.job_url,
             "scraped_at": datetime.now().isoformat()
