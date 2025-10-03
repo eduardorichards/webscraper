@@ -1,5 +1,8 @@
 Remaining taks
 
-- Empezar almacenar los datos, en un principio en JSON
-- Una vez juntadas muchas busquedas relacionadas, entrar en los enlaes, buscar las palabras clave y priorizar busquedas
+
+- Solucionar el tema de los filtros por modalidad y locacion. Funcionan? Porque no se ven por consola?
+- Porque imprime un maximo de 60 busquedas? Cual es el cuello de botella?
+- Encontre la punta de la solucion. Buscar en la url e ir sumando de a 25 0 60 (segun si es browser o scraper) hasta llegar al total de las busquedas
+- Una vez juntadas muchas busquedas relacionadas, entrar en los enlaces, buscar las palabras clave y priorizar busquedas
 

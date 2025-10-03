@@ -46,6 +46,31 @@ def search_without_saving():
     jobs = scraper.search_jobs(test_config, save_results=False)
     
     print(f"Test search found {len(jobs)} jobs (not saved)")
+    
+def multiple_search():
+    
+    from config.settings import SEARCH_TEMPLATES
+    
+    scraper = JobScraper()
+    total_jobs = 0
+    
+    print("Starting multiple search")
+    
+    for i, template in enumerate(SEARCH_TEMPLATES, 1):
+        
+        search_name = template.pop("name", f"search number {i}")
+        
+        print(f"Search {i}/{len(SEARCH_TEMPLATES)}: {search_name}")
+        
+        
+        search_config = SearchConfig(**template)
+        
+        jobs = scraper.search_jobs(search_config, save_results=True)
+        total_jobs += len(jobs)
+        
+        print(f"{jobs} jobs found")
+        
+    print(f"Multiple search completed. {total_jobs} jobs found and saved.")
 
 if __name__ == "__main__":
-    main()
+    multiple_search()

@@ -61,3 +61,25 @@ LOCATION_INDICATORS = [
 # Default extraction limits
 DEFAULT_MAX_JOBS = 50
 DEFAULT_PROCESSING_LIMIT = 100
+
+
+SEARCH_TEMPLATES = [
+    {
+        "name": "Java Junior Argentina 24hs",
+        "keywords": "Java",
+        "location": "Argentina",
+        "experience_levels": [2],
+        "remote": True,
+        "time_posted": "24h",
+        "max_results": 100
+    },
+    {
+        "name": "Java Junior Argentina 24hs",
+        "keywords": "Java",
+        "location": "Argentina",
+        "experience_levels": [2],
+        "remote": False,
+        "time_posted": "1w",
+        "max_results": 100
+    },
+]
