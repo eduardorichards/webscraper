@@ -1,6 +1,7 @@
 """LinkedIn-specific job extraction logic"""
 
 from ..models.job import Job
+from datetime import datetime
 
 
 class LinkedInExtractor:
@@ -44,9 +45,11 @@ class LinkedInExtractor:
         job['location'] = location
         
         
-        posted_date = self._extract_posted_date(card)
+        posted_date, posted_time = self._extract_posted_datetime(card)
         if posted_date:
             job['posted_date'] = posted_date
+        if posted_time:
+            job['posted_time'] = posted_time
         
         # Job URL
         job_url = self._extract_job_url(card)
@@ -65,48 +68,88 @@ class LinkedInExtractor:
         else:
             return 'Not found'
     
-    def _extract_posted_date(self, card):
-        """Extract posted date from job card"""
+    def _extract_posted_datetime(self, card):
+        """Extract posted date AND calculate actual time from 'ago' text"""
         time_element = card.find('time')
+        
         if time_element:
-            return time_element.get_text().strip()
+            datetime_attr = time_element.get('datetime')
+            
+            if datetime_attr:
+                try:
+                    date_obj = datetime.fromisoformat(datetime_attr)
+                    posted_date = date_obj.strftime('%Y-%m-%d')
+                    
+                    # Get the text to check if it's recent (within 24 hours)
+                    time_text = time_element.get_text().strip().lower()
+                    
+                    # Calculate actual time if posted recently
+                    posted_time = self._calculate_time_from_ago(time_text)
+                    
+                    return posted_date, posted_time
+                except (ValueError, TypeError):
+                    pass
+            
+            # Fallback to text
+            text = time_element.get_text().strip()
+            return text, 'Not specified'
         
-        # Alternative: look for text with time keywords
-        time_text = card.find(string=lambda text: text and any(
-            time_word in text.lower() for time_word in ['ago', 'day', 'hour', 'week', 'posted', 'hace']
-        ))
-        if time_text:
-            return time_text.strip()
+        return 'Not specified', 'Not specified'
+
+    def _calculate_time_from_ago(self, time_text):
+        """Calculate actual posting time from 'X hours/minutes ago' text"""
+        import re
+        from datetime import timedelta
         
+        now = datetime.now()
+        
+        # Check if it mentions hours or minutes (within 24 hours)
+        if 'minuto' in time_text or 'minute' in time_text:
+            # Extract number of minutes
+            match = re.search(r'(\d+)\s*minuto', time_text)
+            if match:
+                minutes_ago = int(match.group(1))
+                actual_time = now - timedelta(minutes=minutes_ago)
+                return actual_time.strftime('%H:%M:%S')
+        
+        elif 'hora' in time_text or 'hour' in time_text:
+            # Extract number of hours
+            match = re.search(r'(\d+)\s*hora', time_text)
+            if match:
+                hours_ago = int(match.group(1))
+                actual_time = now - timedelta(hours=hours_ago)
+                return actual_time.strftime('%H:%M:%S')
+        
+        # If it's days, weeks, months - no specific time available
         return 'Not specified'
-    
-    def _extract_job_url(self, card):
-        """Extract job URL from job card"""
-        # Look for job link
-        title_link = card.find('a', class_='job-card-container__link')
-        if title_link:
-            href = title_link.get('href')
-            if href:
-                if href.startswith('/'):
-                    # Force www.linkedin.com instead of country-specific domain
-                    return f"https://www.linkedin.com{href}"
-                else:
-                    # Replace country-specific domain with global
-                    if 'ar.linkedin.com' in href:
-                        return href.replace('ar.linkedin.com', 'www.linkedin.com')
-                    return href
         
-        # Alternative: Look for any link containing '/jobs/view/'
-        all_links = card.find_all('a')
-        for link in all_links:
-            href = link.get('href', '')
-            if '/jobs/view/' in href:
-                if href.startswith('/'):
-                    return f"https://www.linkedin.com{href}"
-                else:
-                    # Replace country-specific domain
-                    if 'ar.linkedin.com' in href:
-                        return href.replace('ar.linkedin.com', 'www.linkedin.com')
-                    return href
-        
-        return 'Not found'
+    def _extract_job_url(self, card):  
+            """Extract job URL from job card"""
+
+            title_link = card.find('a', class_='job-card-container__link')
+            if title_link:
+                href = title_link.get('href')
+                if href:
+                    if href.startswith('/'):
+                        # Force www.linkedin.com instead of country-specific domain
+                        return f"https://www.linkedin.com{href}"
+                    else:
+                        # Replace country-specific domain with global
+                        if 'ar.linkedin.com' in href:
+                            return href.replace('ar.linkedin.com', 'www.linkedin.com')
+                        return href
+            
+            # Alternative: Look for any link containing '/jobs/view/'
+            all_links = card.find_all('a')
+            for link in all_links:
+                href = link.get('href', '')
+                if '/jobs/view/' in href:
+                    if href.startswith('/'):
+                        return f"https://www.linkedin.com{href}"
+                    else:
+                        # Replace country-specific domain
+                        if 'ar.linkedin.com' in href:
+                            return href.replace('ar.linkedin.com', 'www.linkedin.com')
+                        return href
+            
+            return 'Not found'

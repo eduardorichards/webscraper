@@ -14,16 +14,6 @@ def clean_text(text):
                      
     return cleaned.strip()
     
-def save_to_csv(jobs_data, filename="data/offers.csv"):
-    """Save job to CSV file"""
-    try:
-        df = pd.DataFrame(jobs_data)
-        df.to_csv(filename, index=False)
-        print(f"✅ Data saved to {filename}")
-        return True
-    except Exception as e:
-        print(f"❌ Error saving data: {e}")
-        return False
     
 def print_job_summary(job):
     """Print a formatted summary of a job"""

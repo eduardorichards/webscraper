@@ -29,7 +29,7 @@ class LinkedInURLBuilder:
         # Time Posted
         if search_config.time_posted and search_config.time_posted in TIME_POSTED_MAPPING:
             time_code = TIME_POSTED_MAPPING[search_config.time_posted]
-            query_params.append(f"f_TPR={time_code}")
+            query_params.append(f"f_TPR=r{time_code}")
         
         # Experience Levels (NEW)
         if search_config.experience_levels:

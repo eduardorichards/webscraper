@@ -1,20 +1,21 @@
-
 import requests
 from bs4 import BeautifulSoup
 from .url_builder import LinkedInURLBuilder
 from ..extractors.linkedin_extractor import LinkedInExtractor
 from config.settings import DEFAULT_HEADERS
 from utils.json_storage import JSONStorage
+from utils.sqlite_storage import SQLiteStorage  # Updated import
 
 
 class JobScraper:
     """Main scraper class for job search websites"""
     
     def __init__(self):
-        self.headers = DEFAULT_HEADERS
-        self.linkedin_extractor = LinkedInExtractor()
         self.url_builder = LinkedInURLBuilder()
-        self.storage = JSONStorage()
+        self.linkedin_extractor = LinkedInExtractor()
+        self.headers = DEFAULT_HEADERS
+        self.json_storage = JSONStorage()  # Keep for future use
+        self.sqlite_storage = SQLiteStorage()  # Primary storage
     
     def search_jobs(self, search_config, save_results=True):
         """Search for jobs based on configuration"""
@@ -30,14 +31,15 @@ class JobScraper:
         # Extract jobs
         jobs = self.linkedin_extractor.extract_jobs(soup, search_config.max_results)
         
-        if save_results:
+        # Save results to SQLite database (with duplicate prevention)
+        if save_results and jobs:
             try:
-                saved_path = self.storage.save_search_results(search_config, jobs)
-                if saved_path:
-                    print(f"Results saved in: {saved_path}")
+                self.sqlite_storage.append_jobs(jobs, search_config)
+                # Optional: Uncomment to also save JSON
+                # self.json_storage.save_search_results(search_config, jobs)
             except Exception as e:
-                print(f"Error saving results: {e}")
-    
+                print(f"⚠️  Warning: Could not save results: {e}")
+        
         return jobs
     
     def _get_page_content(self, url):

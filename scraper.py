@@ -1,7 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
-from utils.helpers import save_to_csv, clean_text
+from utils.helpers import clean_text
+from utils.sqlite_storage import SQLiteStorage  # Updated import
 import time
 
 class Jobscraper:
@@ -19,6 +19,7 @@ class Jobscraper:
             'Cache-Control': 'max-age=0',
         }
         self.jobs = []
+        self.sqlite_storage = SQLiteStorage()  # Use SQLite for storage
         
     def test_connection(self, url):
         """Test basic web scraping connection"""
@@ -170,6 +171,8 @@ class Jobscraper:
             
             jobs_data.append(job)
         
+        # Save jobs to SQLite database
+        self.sqlite_storage.append_jobs(jobs_data, search_config=None)
         return jobs_data
     
     def build_linkedin_search_url(self, search_config):

@@ -19,9 +19,11 @@ DEFAULT_HEADERS = {
 
 # Time posted mapping for LinkedIn
 TIME_POSTED_MAPPING = {
-    '24h': 'r86400',
-    '1w': 'r604800',
-    '1m': 'r2592000'
+    '1h': '3600',
+    '2h': '7200',
+    '24': '86400',
+    '1w': '604800',
+    '1m': '2592000'
 }
 
 # Experience level mapping
@@ -64,22 +66,117 @@ DEFAULT_PROCESSING_LIMIT = 100
 
 
 SEARCH_TEMPLATES = [
-    {
-        "name": "Java Junior Argentina 24hs remoto",
-        "keywords": "Java",
+        {
+        "name": "Developer Arg Jr",
+        "keywords": "Junior Developer",
         "location": "Argentina",
-        "experience_levels": [2],
-        "remote": True,
-        "time_posted": "24h",
-        "max_results": 100
-    },
-    {
-        "name": "Java Junior Argentina 24hs",
-        "keywords": "Java",
-        "location": "Argentina",
-        "experience_levels": [2],
+        "experience_levels": [1, 2],
         "remote": False,
-        "time_posted": "1w",
+        "time_posted": "24",
         "max_results": 100
     },
+    {
+        "name": "Java Arg Jr",
+        "keywords": "Java",
+        "location": "Argentina",
+        "experience_levels": [1, 2],
+        "remote": False,
+        "time_posted": "24",
+        "max_results": 100
+    },
+    {
+        "name": "Python Arg Jr",
+        "keywords": "Python",
+        "location": "Argentina",
+        "experience_levels": [1, 2],
+        "remote": False,
+        "time_posted": "24",
+        "max_results": 100
+    },    
+    {
+        "name": "Backend Arg Jr Remote",
+        "keywords": "Backend",
+        "location": "Argentina",
+        "experience_levels": [1, 2],
+        "remote": False,
+        "time_posted": "24",
+        "max_results": 100
+    },
+    {
+        "name": "Software Developer Arg Jr Remote",
+        "keywords": "Software Developer",
+        "location": "Argentina",
+        "experience_levels": [1, 2],
+        "remote": False,
+        "time_posted": "24",
+        "max_results": 100
+    },
+    {
+        "name": "Fullstack Arg Jr Remote",
+        "keywords": "Fullstack",
+        "location": "Argentina",
+        "experience_levels": [1, 2],
+        "remote": False,
+        "time_posted": "24",
+        "max_results": 100
+    },
+    {
+        "name": "Java Latam Remote",
+        "keywords": "Java",
+        "location": "Latin America",
+        "experience_levels": [1, 2],
+        "remote": True,
+        "time_posted": "24",
+        "max_results": 100
+    },
+    {
+        "name": "Python Latam Remote",
+        "keywords": "Python",
+        "location": "Latin America",
+        "experience_levels": [1, 2],
+        "remote": True,
+        "time_posted": "24",
+        "max_results": 100
+    },    
+    {
+        "name": "Backend Latam Remote",
+        "keywords": "Backend",
+        "location": "Latin America",
+        "experience_levels": [1, 2],
+        "remote": True,
+        "time_posted": "24",
+        "max_results": 100
+    },
+    {
+        "name": "Software Developer Latam Remote",
+        "keywords": "Software Developer",
+        "location": "Latin America",
+        "experience_levels": [1, 2],
+        "remote": True,
+        "time_posted": "24",
+        "max_results": 100
+    },
+    {
+        "name": "Fullstack Latam Remote",
+        "keywords": "Fullstack",
+        "location": "Latin America",
+        "experience_levels": [1, 2],
+        "remote": True,
+        "time_posted": "24",
+        "max_results": 100
+    },
+    {
+        "name": "Developer Jr Latam Remote",
+        "keywords": "Junior Developer",
+        "location": "Latin America",
+        "experience_levels": [1, 2],
+        "remote": True,
+        "time_posted": "24",
+        "max_results": 100
+    },
+    
+]
+
+
+SEARCH_TEMPLATES_UNUSED = [
 ]
