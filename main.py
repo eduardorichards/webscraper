@@ -3,6 +3,9 @@ Main entry point for the Job Scraper application
 """
 
 from scraper import JobScraper, SearchConfig
+from scraper.models.keyword_config import KeywordConfig
+from scraper.core.keyword_matcher import KeywordMatcher
+from utils.sqlite_storage import SQLiteStorage
 
 
 def main():
@@ -101,7 +104,96 @@ def parse_html():
         
         with open('data/linkedin_page.html', 'w', encoding='utf-8') as f:
             f.write(soup)
-        
+
+
+def analyze_keywords(keywords=None, weights=None, skip_analyzed=True, top_n=20):
+    """
+    Analyze stored jobs for keyword matches.
+
+    Args:
+        keywords: List of keywords to search for (uses defaults if None)
+        weights: Optional dict of keyword weights
+        skip_analyzed: Skip jobs already analyzed with these keywords
+        top_n: Number of top results to display
+    """
+    from config.keyword_settings import DEFAULT_KEYWORDS, WEIGHTED_KEYWORDS
+
+    # Use provided keywords or defaults
+    if keywords is None:
+        keywords = DEFAULT_KEYWORDS
+    if weights is None:
+        weights = WEIGHTED_KEYWORDS
+
+    print("🔍 KEYWORD ANALYSIS")
+    print("=" * 50)
+
+    # Create keyword config
+    keyword_config = KeywordConfig(
+        keywords=keywords,
+        weights=weights
+    )
+
+    # Initialize storage and matcher
+    storage = SQLiteStorage()
+    matcher = KeywordMatcher(storage, keyword_config)
+
+    # Run analysis
+    results = matcher.analyze_jobs(skip_analyzed=skip_analyzed)
+
+    # Display results
+    if results:
+        matcher.display_results(results, top_n=top_n)
+
+        # Show statistics
+        stats = storage.get_analysis_stats(keyword_config.get_keywords_string())
+        print(f"\n📈 ANALYSIS STATISTICS:")
+        print(f"   Total analyzed: {stats['total_analyzed']}")
+        print(f"   Average score: {stats['avg_score']:.1f}")
+        print(f"   Max score: {stats['max_score']:.1f}")
+        print(f"   Average match %: {stats['avg_match_pct']:.1f}%")
+    else:
+        print("No jobs to analyze. Run multiple_search() first to collect jobs.")
+
+    return results
+
+
+def analyze_with_custom_keywords():
+    """Example: Analyze with custom keywords and weights."""
+    # Define your custom keywords
+    my_keywords = [
+        "Python",
+        "Django",
+        "FastAPI",
+        "PostgreSQL",
+        "Docker",
+        "AWS",
+        "REST API",
+        "Git",
+    ]
+
+    # Define weights (higher = more important)
+    my_weights = {
+        "Python": 2.0,
+        "Django": 1.5,
+        "FastAPI": 1.5,
+        "PostgreSQL": 1.2,
+        "Docker": 1.3,
+        "AWS": 1.2,
+        "REST API": 1.5,
+        "Git": 0.8,
+    }
+
+    return analyze_keywords(
+        keywords=my_keywords,
+        weights=my_weights,
+        skip_analyzed=True,
+        top_n=20
+    )
+
 
 if __name__ == "__main__":
-    multiple_search()
+    # Run batch job search
+    # multiple_search()
+
+    # OR analyze existing jobs for keywords
+    analyze_keywords()

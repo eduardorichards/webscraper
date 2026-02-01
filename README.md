@@ -138,6 +138,42 @@ print(f"Unique companies: {stats['unique_companies']}")
 print(f"Unique locations: {stats['unique_locations']}")
 ```
 
+## Keyword Analysis
+
+Analyze stored jobs for keyword matches and rank by relevance:
+
+```bash
+# Edit main.py to call analyze_keywords() instead of multiple_search()
+python main.py
+```
+
+Configure keywords in `config/keyword_settings.py`:
+```python
+DEFAULT_KEYWORDS = ["Python", "Java", "Docker", ...]
+WEIGHTED_KEYWORDS = {"Python": 2.0, "Java": 2.5, ...}
+```
+
+## Export to CSV
+
+Export analyzed jobs to CSV (deduplicated - removes duplicate remote postings):
+
+```bash
+python3 -c "from utils.sqlite_storage import SQLiteStorage; SQLiteStorage().export_job_summary_csv()"
+```
+
+Creates `data/job_summary_unique.csv` with columns:
+- job_role, company, url, location, remote
+- applicant_count, seniority_level
+- total_matches, weighted_score, match_percentage
+
+## SQL Views
+
+Query directly in any SQLite tool:
+```sql
+SELECT * FROM job_summary_unique;  -- Deduplicated results
+SELECT * FROM job_summary;          -- All results
+```
+
 ## Known Limitations
 
 - Maximum ~60 jobs per search (LinkedIn pagination not yet implemented)
