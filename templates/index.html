@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Scraper Results</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        :root { --pico-font-size: 87.5%; }
+        body { padding: 1rem 2rem; }
+        .stats { display: flex; gap: 2rem; margin-bottom: 1rem; }
+        .stats div { text-align: center; }
+        .stats strong { display: block; font-size: 1.4rem; }
+        .controls { display: flex; gap: 2rem; align-items: center; margin-bottom: 1rem; }
+        .controls label, .controls input { margin-bottom: 0; }
+        .controls input[type=number] { width: 6rem; }
+        table { font-size: 0.85rem; }
+        th { cursor: pointer; user-select: none; white-space: nowrap; }
+        th .arrow { margin-left: 0.3rem; opacity: 0.4; }
+        th.active .arrow { opacity: 1; }
+        td { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        td.keywords-cell { max-width: 300px; white-space: normal; }
+    </style>
+</head>
+<body>
+    <h1>Job Scraper Results</h1>
+
+    <div class="stats">
+        <div><strong>{{ stats.total_analyzed }}</strong><small>Jobs Analyzed</small></div>
+        <div><strong>{{ "%.1f"|format(stats.avg_score) }}</strong><small>Avg Score</small></div>
+        <div><strong>{{ "%.1f"|format(stats.max_score) }}</strong><small>Max Score</small></div>
+        <div><strong>{{ "%.1f"|format(stats.avg_match_pct) }}%</strong><small>Avg Match %</small></div>
+    </div>
+
+    <form class="controls" method="get" id="filterForm">
+        <label>
+            <input type="checkbox" name="unique" value="1" {{ "checked" if unique }}
+                   onchange="this.form.submit()">
+            Deduplicate
+        </label>
+        <label>
+            Min score:
+            <input type="number" name="min_score" value="{{ min_score }}" step="0.5" min="0"
+                   onchange="this.form.submit()">
+        </label>
+        <small>{{ jobs|length }} jobs shown</small>
+    </form>
+
+    {% if jobs %}
+    <figure>
+        <table role="grid" id="jobTable">
+            <thead>
+                <tr>
+                    <th data-sort="string">Job Role <span class="arrow">&#9650;</span></th>
+                    <th data-sort="string">Company <span class="arrow">&#9650;</span></th>
+                    <th data-sort="string">Location <span class="arrow">&#9650;</span></th>
+                    <th data-sort="string">Remote <span class="arrow">&#9650;</span></th>
+                    <th data-sort="number">Applicants <span class="arrow">&#9650;</span></th>
+                    <th data-sort="string">Seniority <span class="arrow">&#9650;</span></th>
+                    <th data-sort="number">Matches <span class="arrow">&#9650;</span></th>
+                    <th data-sort="number">Score <span class="arrow">&#9650;</span></th>
+                    <th data-sort="number">Match % <span class="arrow">&#9650;</span></th>
+                    <th data-sort="string">Keywords <span class="arrow">&#9650;</span></th>
+                    <th>Link</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in jobs %}
+                <tr>
+                    <td title="{{ job.job_role or '' }}">{{ job.job_role or "-" }}</td>
+                    <td title="{{ job.company or '' }}">{{ job.company or "-" }}</td>
+                    <td title="{{ job.location or '' }}">{{ job.location or "-" }}</td>
+                    <td>{{ job.remote or "-" }}</td>
+                    <td>{{ job.applicant_count if job.applicant_count is not none else "-" }}</td>
+                    <td>{{ job.seniority_level or "-" }}</td>
+                    <td>{{ job.total_matches if job.total_matches is not none else "-" }}</td>
+                    <td>{{ "%.1f"|format(job.weighted_score) if job.weighted_score is not none else "-" }}</td>
+                    <td>{{ "%.1f"|format(job.match_percentage) ~ "%" if job.match_percentage is not none else "-" }}</td>
+                    <td class="keywords-cell" title="{{ job.matched_keywords|join(', ') if job.matched_keywords else '' }}">
+                        {{ job.matched_keywords|join(", ") if job.matched_keywords else "-" }}
+                    </td>
+                    <td>
+                        {% if job.url %}
+                        <a href="{{ job.url }}" target="_blank" rel="noopener">View</a>
+                        {% else %}-{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </figure>
+    {% else %}
+    <p>No jobs found. Run the scraper first with <code>python main.py</code>, then analyze with <code>analyze_keywords()</code>.</p>
+    {% endif %}
+
+    <script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const table = document.getElementById("jobTable");
+        if (!table) return;
+        const headers = table.querySelectorAll("th[data-sort]");
+        let currentCol = -1;
+        let ascending = true;
+
+        headers.forEach(function(th, index) {
+            th.addEventListener("click", function() {
+                if (currentCol === index) {
+                    ascending = !ascending;
+                } else {
+                    if (currentCol >= 0) headers[currentCol].classList.remove("active");
+                    currentCol = index;
+                    ascending = true;
+                }
+                th.classList.add("active");
+                th.querySelector(".arrow").innerHTML = ascending ? "&#9650;" : "&#9660;";
+
+                const tbody = table.querySelector("tbody");
+                const rows = Array.from(tbody.querySelectorAll("tr"));
+                const type = th.dataset.sort;
+
+                rows.sort(function(a, b) {
+                    let aVal = a.children[index].textContent.trim();
+                    let bVal = b.children[index].textContent.trim();
+
+                    if (type === "number") {
+                        let aNum = parseFloat(aVal.replace("%", ""));
+                        let bNum = parseFloat(bVal.replace("%", ""));
+                        if (isNaN(aNum)) aNum = ascending ? Infinity : -Infinity;
+                        if (isNaN(bNum)) bNum = ascending ? Infinity : -Infinity;
+                        return ascending ? aNum - bNum : bNum - aNum;
+                    } else {
+                        if (aVal === "-") aVal = ascending ? "\uffff" : "";
+                        if (bVal === "-") bVal = ascending ? "\uffff" : "";
+                        return ascending
+                            ? aVal.localeCompare(bVal, undefined, {sensitivity: "base"})
+                            : bVal.localeCompare(aVal, undefined, {sensitivity: "base"});
+                    }
+                });
+
+                rows.forEach(function(row) { tbody.appendChild(row); });
+            });
+        });
+
+        // Handle unchecked deduplicate: if checkbox unchecked, still pass unique=0
+        document.getElementById("filterForm").addEventListener("submit", function(e) {
+            const cb = this.querySelector('input[name="unique"]');
+            if (!cb.checked) {
+                const hidden = document.createElement("input");
+                hidden.type = "hidden";
+                hidden.name = "unique";
+                hidden.value = "0";
+                this.appendChild(hidden);
+            }
+        });
+    });
+    </script>
+</body>
+</html>

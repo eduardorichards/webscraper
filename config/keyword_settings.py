@@ -27,20 +27,29 @@ DEFAULT_KEYWORDS = [
     "Open Telemetry", "AI", "IA", "LLM", "LLms", "Automated Testing", 
     "Testing", "Automation Testing", "QA", "Architecture", "JUnit", 
     "Mockito", "Agile", "Scrum", "SDLC", "JWT", "OAuth 2.0", "Full Stack", 
-    "Site Reliability Engineer", "SRE", "API", "Restful", "Devops"
+    "Site Reliability Engineer", "SRE", "API", "Restful", "Devops", "Claude", "OpenAI", "Gemini", "Cursor", "Anthropic", "Agentic",
 ]
 
 # Strategic weights: Prioritizing Java, Testing frameworks, and Backend Architecture
 WEIGHTED_KEYWORDS = {
-    "Java": 2.5,                # Your primary specialty
-    "Spring Boot": 2.2,         # Critical for Java Backend roles
-    "JUnit": 2.0,               # Core for Automated Testing
-    "Mockito": 2.0,             # Vital for Mock-based testing in Java
-    "Automated Testing": 1.8,   # High signal for your current studies
-    "Microservices": 1.5,       # High-value architecture keyword
-    "PostgreSQL": 1.4,          # Specific DBs weigh more than "SQL"
-    "Docker": 1.3,              # Essential for modern deployment
-    "OAuth 2.0": 1.2,           # Shows security maturity
-    "Open Telemetry": 1.2,      # Deep backend/monitoring knowledge
-    "SRE": 1.0,                 # Good for cross-disciplinary roles
+    "Java": 5,                # Your primary specialty
+    "Spring Boot": 5,         # Critical for Java Backend roles
+    "JUnit": 4,               # Core for Automated Testing
+    "Mockito": 4,             # Vital for Mock-based testing in Java
+    "Automated Testing": 3,   # High signal for your current studies
+    "Microservices": 4,       # High-value architecture keyword
+    "PostgreSQL": 4,          # Specific DBs weigh more than "SQL"
+    "Docker": 3,              # Essential for modern deployment
+    "OAuth 2.0": 2,           # Shows security maturity
+    "Open Telemetry": 3,      # Deep backend/monitoring knowledge
+    "SRE": 3,                 # Good for cross-disciplinary roles
+    "SQL": 3,
+    "Spring": 4,
+    "AI": 2,
+    "Python": 3,
+    "Git": 2,
+    "Software Developer": 4,
+    "Cybersecurity": 3,
+    "SDLC": 4,
+    "Full Stack": 3,
 }

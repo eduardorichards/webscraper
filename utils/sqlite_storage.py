@@ -106,8 +106,8 @@ class SQLiteStorage:
         ORDER BY ja.weighted_score DESC
         """)
 
-        # Create deduplicated view - keeps only one per (job_role, company) for remote jobs
-        # Keeps the one with lowest applicant count
+        # Create deduplicated view - keeps max 2 per (job_role, company)
+        # Keeps the ones with lowest applicant count
         cursor.execute("DROP VIEW IF EXISTS job_summary_unique")
         cursor.execute("""
         CREATE VIEW job_summary_unique AS
@@ -117,15 +117,14 @@ class SQLiteStorage:
         FROM (
             SELECT *,
                 ROW_NUMBER() OVER (
-                    PARTITION BY job_role, company,
-                        CASE WHEN remote = 'Yes' THEN 'REMOTE' ELSE location END
+                    PARTITION BY job_role, company
                     ORDER BY
                         CASE WHEN applicant_count IS NULL THEN 1 ELSE 0 END,
                         applicant_count ASC
                 ) as row_num
             FROM job_summary
         )
-        WHERE row_num = 1
+        WHERE row_num <= 2
         ORDER BY weighted_score DESC
         """)
 
@@ -243,6 +242,7 @@ class SQLiteStorage:
     def get_jobs_without_analysis(self, search_keywords=None):
         """
         Get jobs that haven't been analyzed yet.
+        Returns max 2 jobs per (title, company) pair to avoid analyzing excessive duplicates.
 
         Args:
             search_keywords: Optional - only get jobs not analyzed with these specific keywords
@@ -253,16 +253,42 @@ class SQLiteStorage:
 
         if search_keywords:
             cursor.execute(f"""
-                SELECT j.* FROM {self.table_name} j
+                WITH ranked_jobs AS (
+                    SELECT j.*,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY j.title, j.company
+                            ORDER BY j.id ASC
+                        ) as row_num
+                    FROM {self.table_name} j
+                )
+                SELECT rj.id, rj.title, rj.company, rj.location, rj.posted_date,
+                       rj.job_url, rj.search_keywords, rj.search_location,
+                       rj.search_experience, rj.search_remote
+                FROM ranked_jobs rj
                 LEFT JOIN job_analyses ja
-                    ON j.id = ja.job_id AND ja.search_keywords = ?
-                WHERE ja.id IS NULL
+                    ON rj.id = ja.job_id AND ja.search_keywords = ?
+                WHERE rj.row_num <= 2
+                  AND ja.id IS NULL
+                ORDER BY rj.id ASC
             """, (search_keywords,))
         else:
             cursor.execute(f"""
-                SELECT j.* FROM {self.table_name} j
-                LEFT JOIN job_analyses ja ON j.id = ja.job_id
-                WHERE ja.id IS NULL
+                WITH ranked_jobs AS (
+                    SELECT j.*,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY j.title, j.company
+                            ORDER BY j.id ASC
+                        ) as row_num
+                    FROM {self.table_name} j
+                )
+                SELECT rj.id, rj.title, rj.company, rj.location, rj.posted_date,
+                       rj.job_url, rj.search_keywords, rj.search_location,
+                       rj.search_experience, rj.search_remote
+                FROM ranked_jobs rj
+                LEFT JOIN job_analyses ja ON rj.id = ja.job_id
+                WHERE rj.row_num <= 2
+                  AND ja.id IS NULL
+                ORDER BY rj.id ASC
             """)
 
         rows = cursor.fetchall()
