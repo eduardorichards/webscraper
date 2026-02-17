@@ -16,10 +16,9 @@ python main.py
 ```
 Job Scraper/
 ├── main.py                      # Entry point - multiple_search() or analyze_keywords()
-├── scraper.py                   # Legacy standalone scraper (deprecated)
+├── web_app.py                   # Flask web interface for viewing results
 ├── config/
 │   ├── settings.py              # Search templates, headers, mappings
-│   ├── storage_setting.py       # Storage paths configuration
 │   └── keyword_settings.py      # Keyword matching & rate limiting config
 ├── scraper/
 │   ├── models/
@@ -37,13 +36,9 @@ Job Scraper/
 │   └── analyzers/
 │       └── keyword_analyzer.py  # KeywordAnalyzer - regex matching
 ├── utils/
-│   ├── helpers.py               # Text cleaning utilities
-│   ├── validators.py            # Input validation
-│   ├── json_storage.py          # JSONStorage class (optional)
-│   └── sqlite_storage.py        # SQLiteStorage class (primary)
+│   └── sqlite_storage.py        # SQLiteStorage class
 ├── data/
-│   ├── database/jobs_master.db  # SQLite database (primary storage)
-│   └── searches/                # JSON files (optional storage)
+│   └── database/jobs_master.db  # SQLite database
 └── tests/
     └── test_scraper.py          # Unit tests
 ```
@@ -135,19 +130,21 @@ CREATE TABLE jobs (
 CREATE TABLE job_analyses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     job_id INTEGER NOT NULL,
+    job_name TEXT,
+    company TEXT,
+    job_url TEXT,
     description TEXT,
     applicant_count INTEGER,
-    seniority_level TEXT,
     employment_type TEXT,
-    keyword_matches TEXT,       -- JSON: {"python": 5, "django": 2}
+    job_function TEXT,
     total_matches INTEGER,
     weighted_score REAL,
     matched_keywords TEXT,
     match_percentage REAL,
-    search_keywords TEXT,
     analyzed_at TIMESTAMP,
     scrape_status TEXT,
-    FOREIGN KEY (job_id) REFERENCES jobs(id)
+    FOREIGN KEY (job_id) REFERENCES jobs(id),
+    UNIQUE(job_id)
 )
 ```
 
@@ -186,7 +183,7 @@ SELECT * FROM job_summary;
 
 ### Export to CSV (one-liner)
 ```bash
-cd "/Users/edu/Documents/Job Scraper" && python3 -c "from utils.sqlite_storage import SQLiteStorage; SQLiteStorage().export_job_summary_csv()"
+python3 -c "from utils.sqlite_storage import SQLiteStorage; SQLiteStorage().export_job_summary_csv()"
 ```
 Creates `data/job_summary_unique.csv` with deduplicated results.
 
@@ -258,8 +255,8 @@ print(f"Analyzed: {stats['total_analyzed']}, Avg score: {stats['avg_score']:.1f}
 - `requests` - HTTP requests
 - `beautifulsoup4` - HTML parsing
 - `lxml` - Parser backend
+- `flask` - Web interface
 - `sqlite3` - Database (built-in)
 
 ## File Locations
 - Database: `data/database/jobs_master.db`
-- Sample HTML: `data/linkedin_page.html`, `data/job_detail_sample.html`

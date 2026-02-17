@@ -32,12 +32,10 @@ class KeywordMatcher:
             list[MatchResult]: Results sorted by weighted_score descending
         """
         # Get jobs to analyze
-        search_keywords = self.keyword_config.get_keywords_string()
-
         if job_ids:
             jobs = self.storage.get_jobs_by_ids(job_ids)
         elif skip_analyzed:
-            jobs = self.storage.get_jobs_without_analysis(search_keywords)
+            jobs = self.storage.get_jobs_without_analysis()
         else:
             jobs = self.storage.get_all_jobs()
 
@@ -70,10 +68,8 @@ class KeywordMatcher:
             if details:
                 result.description = details.get('description')
                 result.applicant_count = details.get('applicant_count')
-                result.seniority_level = details.get('seniority_level')
                 result.employment_type = details.get('employment_type')
                 result.job_function = details.get('job_function')
-                result.industries = details.get('industries')
                 result.scrape_status = 'success'
 
                 # Analyze for keywords
@@ -87,7 +83,7 @@ class KeywordMatcher:
                 print(f"      ✗ Failed to scrape")
 
             # Save to database immediately (for resume capability)
-            self.storage.save_job_analysis(result, self.keyword_config)
+            self.storage.save_job_analysis(result)
             results.append(result)
 
         # Sort by score descending
@@ -109,9 +105,7 @@ class KeywordMatcher:
         Returns:
             list[dict]: Jobs with analysis, sorted by score
         """
-        search_keywords = self.keyword_config.get_keywords_string()
         return self.storage.get_analyzed_jobs(
-            search_keywords=search_keywords,
             min_score=min_score,
             min_keywords=min_keywords,
             limit=limit

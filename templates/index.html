@@ -19,7 +19,7 @@
         th .arrow { margin-left: 0.3rem; opacity: 0.4; }
         th.active .arrow { opacity: 1; }
         td { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        td.keywords-cell { max-width: 300px; white-space: normal; }
+        td.description-cell { max-width: 300px; white-space: normal; }
     </style>
 </head>
 <body>
@@ -51,34 +51,30 @@
         <table role="grid" id="jobTable">
             <thead>
                 <tr>
-                    <th data-sort="string">Job Role <span class="arrow">&#9650;</span></th>
+                    <th data-sort="number">ID <span class="arrow">&#9650;</span></th>
+                    <th data-sort="string">Job Name <span class="arrow">&#9650;</span></th>
                     <th data-sort="string">Company <span class="arrow">&#9650;</span></th>
-                    <th data-sort="string">Location <span class="arrow">&#9650;</span></th>
-                    <th data-sort="string">Remote <span class="arrow">&#9650;</span></th>
-                    <th data-sort="number">Applicants <span class="arrow">&#9650;</span></th>
-                    <th data-sort="string">Seniority <span class="arrow">&#9650;</span></th>
+                    <th data-sort="string">Description <span class="arrow">&#9650;</span></th>
                     <th data-sort="number">Matches <span class="arrow">&#9650;</span></th>
+                    <th data-sort="number">Applicants <span class="arrow">&#9650;</span></th>
                     <th data-sort="number">Score <span class="arrow">&#9650;</span></th>
                     <th data-sort="number">Match % <span class="arrow">&#9650;</span></th>
-                    <th data-sort="string">Keywords <span class="arrow">&#9650;</span></th>
+                    <th data-sort="string">Analyzed At <span class="arrow">&#9650;</span></th>
                     <th>Link</th>
                 </tr>
             </thead>
             <tbody>
                 {% for job in jobs %}
                 <tr>
-                    <td title="{{ job.job_role or '' }}">{{ job.job_role or "-" }}</td>
+                    <td>{{ job.id }}</td>
+                    <td title="{{ job.job_name or '' }}">{{ job.job_name or "-" }}</td>
                     <td title="{{ job.company or '' }}">{{ job.company or "-" }}</td>
-                    <td title="{{ job.location or '' }}">{{ job.location or "-" }}</td>
-                    <td>{{ job.remote or "-" }}</td>
-                    <td>{{ job.applicant_count if job.applicant_count is not none else "-" }}</td>
-                    <td>{{ job.seniority_level or "-" }}</td>
+                    <td class="description-cell" title="{{ job.description or '' }}">{{ job.description[:100] ~ "..." if job.description and job.description|length > 100 else job.description or "-" }}</td>
                     <td>{{ job.total_matches if job.total_matches is not none else "-" }}</td>
+                    <td>{{ job.applicant_count if job.applicant_count is not none else "-" }}</td>
                     <td>{{ "%.1f"|format(job.weighted_score) if job.weighted_score is not none else "-" }}</td>
                     <td>{{ "%.1f"|format(job.match_percentage) ~ "%" if job.match_percentage is not none else "-" }}</td>
-                    <td class="keywords-cell" title="{{ job.matched_keywords|join(', ') if job.matched_keywords else '' }}">
-                        {{ job.matched_keywords|join(", ") if job.matched_keywords else "-" }}
-                    </td>
+                    <td>{{ job.analyzed_at or "-" }}</td>
                     <td>
                         {% if job.url %}
                         <a href="{{ job.url }}" target="_blank" rel="noopener">View</a>

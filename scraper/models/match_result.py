@@ -22,10 +22,8 @@ class MatchResult:
         # Scraped data
         self.description = None
         self.applicant_count = None
-        self.seniority_level = None
         self.employment_type = None
         self.job_function = None
-        self.industries = None
 
         # Match results
         self.keyword_matches = {}  # {keyword: count}
@@ -69,11 +67,8 @@ class MatchResult:
             'company': self.company,
             'description': self.description,
             'applicant_count': self.applicant_count,
-            'seniority_level': self.seniority_level,
             'employment_type': self.employment_type,
             'job_function': self.job_function,
-            'industries': self.industries,
-            'keyword_matches': self.keyword_matches,
             'total_matches': self.total_matches,
             'weighted_score': self.weighted_score,
             'matched_keywords': self.matched_keywords,

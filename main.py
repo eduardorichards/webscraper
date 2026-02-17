@@ -8,48 +8,6 @@ from scraper.core.keyword_matcher import KeywordMatcher
 from utils.sqlite_storage import SQLiteStorage
 
 
-def main():
-    """Main function to run job scraping"""
-
-    scraper = JobScraper()
-
-    print("🎯 JOB SCRAPER STARTED")
-    print("="*50)
-
-    search_config = SearchConfig(
-        keywords='python',
-        location='Latin america',
-        time_posted='24h',
-        remote=True,
-        experience_levels=[2],
-        max_results=100
-    )
-
-    jobs = scraper.search_jobs(search_config, save_results=True)
-
-    if jobs:
-        scraper.display_results(jobs)
-    else:
-        print("No jobs found or connection failed")
-
-def search_without_saving():
-    """Example: Search without saving results (for testing)"""
-    print("\nTESTING MODE - NO STORAGE")
-    print("="*40)
-
-    scraper = JobScraper()
-
-    test_config = SearchConfig(
-        keywords='java test',
-        location='Argentina',
-        experience_levels=[2, 3],
-        max_results=5
-    )
-
-    jobs = scraper.search_jobs(test_config, save_results=False)
-
-    print(f"Test search found {len(jobs)} jobs (not saved)")
-
 def multiple_search():
     """Run multiple predefined searches"""
     from config.settings import SEARCH_TEMPLATES
@@ -85,26 +43,6 @@ def multiple_search():
         print(f"   Total unique jobs: {stats['total_jobs']}")
         print(f"   Unique companies: {stats['unique_companies']}")
         print(f"   Unique locations: {stats['unique_locations']}")
-
-def parse_html():
-        from bs4 import BeautifulSoup
-        import requests
-
-        import os
-
-        url = 'https://www.linkedin.com/jobs/search/?keywords=Java&location=Argentina&geoId=100446943&f_E=2&f_TPR=r604800'
-
-        page = requests.get(url)
-
-        soup = BeautifulSoup(page.text, 'html')
-
-        soup = soup.prettify()
-
-        os.makedirs
-
-        with open('data/linkedin_page.html', 'w', encoding='utf-8') as f:
-            f.write(soup)
-
 
 def analyze_keywords(keywords=None, weights=None, skip_analyzed=True, top_n=20):
     """
@@ -145,7 +83,7 @@ def analyze_keywords(keywords=None, weights=None, skip_analyzed=True, top_n=20):
         matcher.display_results(results, top_n=top_n)
 
         # Show statistics
-        stats = storage.get_analysis_stats(keyword_config.get_keywords_string())
+        stats = storage.get_analysis_stats()
         print(f"\n📈 ANALYSIS STATISTICS:")
         print(f"   Total analyzed: {stats['total_analyzed']}")
         print(f"   Average score: {stats['avg_score']:.1f}")
@@ -155,40 +93,6 @@ def analyze_keywords(keywords=None, weights=None, skip_analyzed=True, top_n=20):
         print("No jobs to analyze. Run multiple_search() first to collect jobs.")
 
     return results
-
-
-def analyze_with_custom_keywords():
-    """Example: Analyze with custom keywords and weights."""
-    # Define your custom keywords
-    my_keywords = [
-        "Python",
-        "Django",
-        "FastAPI",
-        "PostgreSQL",
-        "Docker",
-        "AWS",
-        "REST API",
-        "Git",
-    ]
-
-    # Define weights (higher = more important)
-    my_weights = {
-        "Python": 2.0,
-        "Django": 1.5,
-        "FastAPI": 1.5,
-        "PostgreSQL": 1.2,
-        "Docker": 1.3,
-        "AWS": 1.2,
-        "REST API": 1.5,
-        "Git": 0.8,
-    }
-
-    return analyze_keywords(
-        keywords=my_keywords,
-        weights=my_weights,
-        skip_analyzed=True,
-        top_n=20
-    )
 
 
 if __name__ == "__main__":

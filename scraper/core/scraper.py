@@ -3,8 +3,7 @@ from bs4 import BeautifulSoup
 from .url_builder import LinkedInURLBuilder
 from ..extractors.linkedin_extractor import LinkedInExtractor
 from config.settings import DEFAULT_HEADERS
-from utils.json_storage import JSONStorage
-from utils.sqlite_storage import SQLiteStorage  # Updated import
+from utils.sqlite_storage import SQLiteStorage
 
 
 class JobScraper:
@@ -14,8 +13,7 @@ class JobScraper:
         self.url_builder = LinkedInURLBuilder()
         self.linkedin_extractor = LinkedInExtractor()
         self.headers = DEFAULT_HEADERS
-        self.json_storage = JSONStorage()  # Keep for future use
-        self.sqlite_storage = SQLiteStorage()  # Primary storage
+        self.sqlite_storage = SQLiteStorage()
     
     def search_jobs(self, search_config, save_results=True):
         """Search for jobs based on configuration"""
@@ -35,8 +33,6 @@ class JobScraper:
         if save_results and jobs:
             try:
                 self.sqlite_storage.append_jobs(jobs, search_config)
-                # Optional: Uncomment to also save JSON
-                # self.json_storage.save_search_results(search_config, jobs)
             except Exception as e:
                 print(f"⚠️  Warning: Could not save results: {e}")
         

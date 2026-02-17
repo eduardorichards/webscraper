@@ -1,6 +1,5 @@
 """URL Builder for LinkedIn job searches"""
 
-import requests
 from urllib.parse import quote_plus
 from config.settings import LINKEDIN_BASE_URL, TIME_POSTED_MAPPING, EXPERIENCE_LEVELS
 
@@ -63,16 +62,3 @@ class LinkedInURLBuilder:
             return final_url
         else:
             return LINKEDIN_BASE_URL
-    
-    @staticmethod
-    def get_experience_level_info():
-        """Get human-readable experience level information"""
-        print("📊 Available Experience Levels:")
-        for code, name in EXPERIENCE_LEVELS.items():
-            print(f"   {code}: {name}")
-        print()
-        print("💡 Usage examples:")
-        print("   experience_levels=[2]      # Entry level only")
-        print("   experience_levels=[2,3]    # Entry + Associate")
-        print("   experience_levels=[1,2,3]  # All junior levels")
-        print("   experience_levels=[4,5,6]  # All senior levels")

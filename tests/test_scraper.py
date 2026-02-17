@@ -43,11 +43,11 @@ class TestJobScraper(unittest.TestCase):
         config = SearchConfig(
             keywords="java developer",
             location="Argentina",
-            time_posted="24h",
+            time_posted="24",
             remote=False
         )
         
-        url = LinkedInURLBuilder.build_search_url(config)
+        url = LinkedInURLBuilder.build_url(config)
         
         self.assertIn("linkedin.com", url)
         self.assertIn("keywords=", url)

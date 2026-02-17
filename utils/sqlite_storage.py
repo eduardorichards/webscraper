@@ -1,6 +1,5 @@
 """SQLite storage for job search results with duplicate prevention."""
 import sqlite3
-import json
 from pathlib import Path
 from datetime import datetime
 
@@ -55,23 +54,49 @@ class SQLiteStorage:
         CREATE TABLE IF NOT EXISTS job_analyses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_id INTEGER NOT NULL,
+            job_name TEXT,
+            company TEXT,
+            job_url TEXT,
             description TEXT,
             applicant_count INTEGER,
-            seniority_level TEXT,
             employment_type TEXT,
             job_function TEXT,
-            industries TEXT,
-            keyword_matches TEXT,
             total_matches INTEGER,
             weighted_score REAL,
             matched_keywords TEXT,
             match_percentage REAL,
-            search_keywords TEXT,
             analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             scrape_status TEXT DEFAULT 'pending',
             FOREIGN KEY (job_id) REFERENCES jobs(id),
-            UNIQUE(job_id, search_keywords)
+            UNIQUE(job_id)
         )
+        """)
+
+        # Migrate: add missing columns if needed
+        cursor.execute("PRAGMA table_info(job_analyses)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        if 'job_name' not in existing_cols:
+            cursor.execute("ALTER TABLE job_analyses ADD COLUMN job_name TEXT")
+        if 'company' not in existing_cols:
+            cursor.execute("ALTER TABLE job_analyses ADD COLUMN company TEXT")
+        if 'job_url' not in existing_cols:
+            cursor.execute("ALTER TABLE job_analyses ADD COLUMN job_url TEXT")
+
+        # Backfill job_name, company, and job_url from jobs table for existing rows
+        cursor.execute("""
+            UPDATE job_analyses SET job_name = (
+                SELECT j.title FROM jobs j WHERE j.id = job_analyses.job_id
+            ) WHERE job_name IS NULL
+        """)
+        cursor.execute("""
+            UPDATE job_analyses SET company = (
+                SELECT j.company FROM jobs j WHERE j.id = job_analyses.job_id
+            ) WHERE company IS NULL
+        """)
+        cursor.execute("""
+            UPDATE job_analyses SET job_url = (
+                SELECT j.job_url FROM jobs j WHERE j.id = job_analyses.job_id
+            ) WHERE job_url IS NULL
         """)
 
         # Create index for faster queries
@@ -89,20 +114,18 @@ class SQLiteStorage:
         cursor.execute("""
         CREATE VIEW job_summary AS
         SELECT
-            j.title AS job_role,
-            j.company,
-            j.job_url AS url,
-            j.location,
-            j.search_remote AS remote,
-            ja.applicant_count,
-            ja.seniority_level,
+            ja.id,
+            ja.job_name,
+            ja.company,
+            ja.description,
             ja.total_matches,
+            ja.applicant_count,
             ja.weighted_score,
             ja.match_percentage,
-            ja.matched_keywords,
-            ja.analyzed_at
-        FROM jobs j
-        INNER JOIN job_analyses ja ON j.id = ja.job_id
+            ja.analyzed_at,
+            j.job_url AS url
+        FROM job_analyses ja
+        INNER JOIN jobs j ON j.id = ja.job_id
         ORDER BY ja.weighted_score DESC
         """)
 
@@ -111,13 +134,12 @@ class SQLiteStorage:
         cursor.execute("DROP VIEW IF EXISTS job_summary_unique")
         cursor.execute("""
         CREATE VIEW job_summary_unique AS
-        SELECT job_role, company, url, location, remote,
-               applicant_count, seniority_level, total_matches,
-               weighted_score, match_percentage, matched_keywords, analyzed_at
+        SELECT id, job_name, company, description, total_matches,
+               applicant_count, weighted_score, match_percentage, analyzed_at, url
         FROM (
             SELECT *,
                 ROW_NUMBER() OVER (
-                    PARTITION BY job_role, company
+                    PARTITION BY job_name, company
                     ORDER BY
                         CASE WHEN applicant_count IS NULL THEN 1 ELSE 0 END,
                         applicant_count ASC
@@ -239,99 +261,71 @@ class SQLiteStorage:
         conn.close()
         return [dict(row) for row in rows]
 
-    def get_jobs_without_analysis(self, search_keywords=None):
+    def get_jobs_without_analysis(self):
         """
         Get jobs that haven't been analyzed yet.
         Returns max 2 jobs per (title, company) pair to avoid analyzing excessive duplicates.
-
-        Args:
-            search_keywords: Optional - only get jobs not analyzed with these specific keywords
         """
         conn = sqlite3.connect(self.db_file)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        if search_keywords:
-            cursor.execute(f"""
-                WITH ranked_jobs AS (
-                    SELECT j.*,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY j.title, j.company
-                            ORDER BY j.id ASC
-                        ) as row_num
-                    FROM {self.table_name} j
-                )
-                SELECT rj.id, rj.title, rj.company, rj.location, rj.posted_date,
-                       rj.job_url, rj.search_keywords, rj.search_location,
-                       rj.search_experience, rj.search_remote
-                FROM ranked_jobs rj
-                LEFT JOIN job_analyses ja
-                    ON rj.id = ja.job_id AND ja.search_keywords = ?
-                WHERE rj.row_num <= 2
-                  AND ja.id IS NULL
-                ORDER BY rj.id ASC
-            """, (search_keywords,))
-        else:
-            cursor.execute(f"""
-                WITH ranked_jobs AS (
-                    SELECT j.*,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY j.title, j.company
-                            ORDER BY j.id ASC
-                        ) as row_num
-                    FROM {self.table_name} j
-                )
-                SELECT rj.id, rj.title, rj.company, rj.location, rj.posted_date,
-                       rj.job_url, rj.search_keywords, rj.search_location,
-                       rj.search_experience, rj.search_remote
-                FROM ranked_jobs rj
-                LEFT JOIN job_analyses ja ON rj.id = ja.job_id
-                WHERE rj.row_num <= 2
-                  AND ja.id IS NULL
-                ORDER BY rj.id ASC
-            """)
+        cursor.execute(f"""
+            WITH ranked_jobs AS (
+                SELECT j.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY j.title, j.company
+                        ORDER BY j.id ASC
+                    ) as row_num
+                FROM {self.table_name} j
+            )
+            SELECT rj.id, rj.title, rj.company, rj.location, rj.posted_date,
+                   rj.job_url, rj.search_keywords, rj.search_location,
+                   rj.search_experience, rj.search_remote
+            FROM ranked_jobs rj
+            LEFT JOIN job_analyses ja ON rj.id = ja.job_id
+            WHERE rj.row_num <= 2
+              AND ja.id IS NULL
+            ORDER BY rj.id ASC
+        """)
 
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
 
-    def save_job_analysis(self, match_result, keyword_config):
+    def save_job_analysis(self, match_result):
         """
         Save or update job analysis results.
 
         Args:
             match_result: MatchResult instance with analysis data
-            keyword_config: KeywordConfig instance used for analysis
         """
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
 
-        search_keywords = keyword_config.get_keywords_string()
-        keyword_matches_json = json.dumps(match_result.keyword_matches)
         matched_keywords_str = ','.join(match_result.matched_keywords)
 
         cursor.execute("""
             INSERT OR REPLACE INTO job_analyses (
-                job_id, description, applicant_count, seniority_level,
-                employment_type, job_function, industries,
-                keyword_matches, total_matches, weighted_score,
-                matched_keywords, match_percentage, search_keywords,
+                job_id, job_name, company, job_url, description, applicant_count,
+                employment_type, job_function,
+                total_matches, weighted_score,
+                matched_keywords, match_percentage,
                 analyzed_at, scrape_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             match_result.job_id,
+            match_result.title,
+            match_result.company,
+            match_result.job_url,
             match_result.description,
             match_result.applicant_count,
-            match_result.seniority_level,
             match_result.employment_type,
             match_result.job_function,
-            match_result.industries,
-            keyword_matches_json,
             match_result.total_matches,
             match_result.weighted_score,
             matched_keywords_str,
             match_result.match_percentage,
-            search_keywords,
             datetime.now().isoformat(),
             match_result.scrape_status
         ))
@@ -339,13 +333,12 @@ class SQLiteStorage:
         conn.commit()
         conn.close()
 
-    def get_analyzed_jobs(self, search_keywords=None, min_score=0, min_keywords=0,
+    def get_analyzed_jobs(self, min_score=0, min_keywords=0,
                           order_by='weighted_score DESC', limit=None):
         """
         Get analyzed jobs with optional filtering.
 
         Args:
-            search_keywords: Filter by specific keyword set used for analysis
             min_score: Minimum weighted score threshold
             min_keywords: Minimum number of matched keywords
             order_by: SQL ORDER BY clause
@@ -361,8 +354,8 @@ class SQLiteStorage:
         query = f"""
             SELECT
                 j.id, j.title, j.company, j.location, j.posted_date, j.job_url,
-                ja.description, ja.applicant_count, ja.seniority_level,
-                ja.employment_type, ja.keyword_matches, ja.total_matches,
+                ja.description, ja.applicant_count,
+                ja.employment_type, ja.total_matches,
                 ja.weighted_score, ja.matched_keywords, ja.match_percentage,
                 ja.analyzed_at, ja.scrape_status
             FROM {self.table_name} j
@@ -370,10 +363,6 @@ class SQLiteStorage:
             WHERE ja.weighted_score >= ?
         """
         params = [min_score]
-
-        if search_keywords:
-            query += " AND ja.search_keywords = ?"
-            params.append(search_keywords)
 
         if min_keywords > 0:
             # Count matched keywords by comma-separated length
@@ -390,42 +379,28 @@ class SQLiteStorage:
 
         conn.close()
 
-        # Parse JSON fields
         results = []
         for row in rows:
             result = dict(row)
-            if result.get('keyword_matches'):
-                result['keyword_matches'] = json.loads(result['keyword_matches'])
             if result.get('matched_keywords'):
                 result['matched_keywords'] = result['matched_keywords'].split(',')
             results.append(result)
 
         return results
 
-    def get_analysis_stats(self, search_keywords=None):
+    def get_analysis_stats(self):
         """Get statistics about analyzed jobs."""
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
 
-        if search_keywords:
-            cursor.execute("""
-                SELECT
-                    COUNT(*) as total_analyzed,
-                    AVG(weighted_score) as avg_score,
-                    MAX(weighted_score) as max_score,
-                    AVG(match_percentage) as avg_match_pct
-                FROM job_analyses
-                WHERE search_keywords = ?
-            """, (search_keywords,))
-        else:
-            cursor.execute("""
-                SELECT
-                    COUNT(*) as total_analyzed,
-                    AVG(weighted_score) as avg_score,
-                    MAX(weighted_score) as max_score,
-                    AVG(match_percentage) as avg_match_pct
-                FROM job_analyses
-            """)
+        cursor.execute("""
+            SELECT
+                COUNT(*) as total_analyzed,
+                AVG(weighted_score) as avg_score,
+                MAX(weighted_score) as max_score,
+                AVG(match_percentage) as avg_match_pct
+            FROM job_analyses
+        """)
 
         row = cursor.fetchone()
         conn.close()
@@ -441,9 +416,8 @@ class SQLiteStorage:
         """
         Get job summary from the combined view.
 
-        Returns jobs with: job_role, company, url, location, remote,
-        applicant_count, seniority_level, total_matches, weighted_score,
-        match_percentage, matched_keywords
+        Returns jobs with: id, job_name, company, description, total_matches,
+        applicant_count, weighted_score, match_percentage, analyzed_at, url
 
         Args:
             min_score: Minimum weighted score threshold
@@ -468,15 +442,7 @@ class SQLiteStorage:
         rows = cursor.fetchall()
         conn.close()
 
-        results = []
-        for row in rows:
-            result = dict(row)
-            # Parse matched_keywords if present
-            if result.get('matched_keywords'):
-                result['matched_keywords'] = result['matched_keywords'].split(',')
-            results.append(result)
-
-        return results
+        return [dict(row) for row in rows]
 
     def export_job_summary_csv(self, filepath=None, min_score=0, unique=True):
         """
@@ -501,18 +467,15 @@ class SQLiteStorage:
 
         # Define column order
         columns = [
-            'job_role', 'company', 'url', 'location', 'remote',
-            'applicant_count', 'seniority_level', 'total_matches',
-            'weighted_score', 'match_percentage', 'matched_keywords'
+            'id', 'job_name', 'company', 'description', 'total_matches',
+            'applicant_count', 'weighted_score', 'match_percentage',
+            'analyzed_at', 'url'
         ]
 
         with open(filepath, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=columns, extrasaction='ignore')
             writer.writeheader()
             for job in jobs:
-                # Convert matched_keywords list to string for CSV
-                if isinstance(job.get('matched_keywords'), list):
-                    job['matched_keywords'] = ', '.join(job['matched_keywords'])
                 writer.writerow(job)
 
         print(f"✅ Exported {len(jobs)} jobs to {filepath}")
