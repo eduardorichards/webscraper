@@ -1,0 +1,15 @@
+[Unit]
+Description=Job Scraper Flask Web App
+After=network.target
+
+[Service]
+Type=simple
+User=edu
+WorkingDirectory=/home/edu/Job-Scraper
+Environment=PATH=/home/edu/Job-Scraper/venv/bin:/usr/bin:/bin
+ExecStart=/home/edu/Job-Scraper/venv/bin/python web_app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

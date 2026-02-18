@@ -72,7 +72,7 @@ SEARCH_TEMPLATES = [
         "location": "Argentina",
         "experience_levels": [1, 2],
         "remote": False,
-        "time_posted": "24",
+        "time_posted": "1h",
         "max_results": 100
     },
     {
@@ -81,7 +81,7 @@ SEARCH_TEMPLATES = [
         "location": "Argentina",
         "experience_levels": [1, 2],
         "remote": False,
-        "time_posted": "24",
+        "time_posted": "1h",
         "max_results": 100
     },
     {
@@ -90,7 +90,7 @@ SEARCH_TEMPLATES = [
         "location": "Argentina",
         "experience_levels": [1, 2],
         "remote": False,
-        "time_posted": "24",
+        "time_posted": "1h",
         "max_results": 100
     },    
     {
@@ -99,7 +99,7 @@ SEARCH_TEMPLATES = [
         "location": "Argentina",
         "experience_levels": [1, 2],
         "remote": False,
-        "time_posted": "24",
+        "time_posted": "1h",
         "max_results": 100
     },
     {
@@ -108,7 +108,7 @@ SEARCH_TEMPLATES = [
         "location": "Argentina",
         "experience_levels": [1, 2],
         "remote": False,
-        "time_posted": "24",
+        "time_posted": "1h",
         "max_results": 100
     },
     {
@@ -117,7 +117,7 @@ SEARCH_TEMPLATES = [
         "location": "Argentina",
         "experience_levels": [1, 2],
         "remote": False,
-        "time_posted": "24",
+        "time_posted": "1h",
         "max_results": 100
     },
     {
@@ -126,7 +126,7 @@ SEARCH_TEMPLATES = [
         "location": "Latin America",
         "experience_levels": [1, 2],
         "remote": True,
-        "time_posted": "24",
+        "time_posted": "1h",
         "max_results": 100
     },
     {
@@ -135,7 +135,7 @@ SEARCH_TEMPLATES = [
         "location": "Latin America",
         "experience_levels": [1, 2],
         "remote": True,
-        "time_posted": "24",
+        "time_posted": "1h",
         "max_results": 100
     },    
     {
@@ -144,7 +144,7 @@ SEARCH_TEMPLATES = [
         "location": "Latin America",
         "experience_levels": [1, 2],
         "remote": True,
-        "time_posted": "24",
+        "time_posted": "1h",
         "max_results": 100
     },
     {
@@ -153,7 +153,7 @@ SEARCH_TEMPLATES = [
         "location": "Latin America",
         "experience_levels": [1, 2],
         "remote": True,
-        "time_posted": "24",
+        "time_posted": "1h",
         "max_results": 100
     },
     {
@@ -162,7 +162,7 @@ SEARCH_TEMPLATES = [
         "location": "Latin America",
         "experience_levels": [1, 2],
         "remote": True,
-        "time_posted": "24",
+        "time_posted": "1h",
         "max_results": 100
     },
     {
@@ -171,7 +171,7 @@ SEARCH_TEMPLATES = [
         "location": "Latin America",
         "experience_levels": [1, 2],
         "remote": True,
-        "time_posted": "24",
+        "time_posted": "1h",
         "max_results": 100
     },
     

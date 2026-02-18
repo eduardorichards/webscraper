@@ -5,18 +5,18 @@ A Python-based LinkedIn job scraper that searches for job listings, extracts dat
 
 ## Quick Start
 ```bash
-# Run batch job search
+# Run full pipeline: search + keyword analysis
 python main.py
-
-# Analyze stored jobs for keyword matches (edit main.py __main__ block)
-# Change to: analyze_keywords()
 ```
+`main.py` calls `setup_logging()`, then runs `multiple_search()` followed by `analyze_keywords()` in sequence. Logs go to both stdout and `data/logs/scraper.log`.
 
 ## Project Structure
 ```
 Job Scraper/
-├── main.py                      # Entry point - multiple_search() or analyze_keywords()
+├── main.py                      # Entry point - runs search + analysis pipeline
 ├── web_app.py                   # Flask web interface for viewing results
+├── run_scraper.sh               # Cron wrapper (lock file, virtualenv, logging)
+├── job-scraper-web.service      # systemd unit for Flask web app
 ├── config/
 │   ├── settings.py              # Search templates, headers, mappings
 │   └── keyword_settings.py      # Keyword matching & rate limiting config
@@ -38,7 +38,8 @@ Job Scraper/
 ├── utils/
 │   └── sqlite_storage.py        # SQLiteStorage class
 ├── data/
-│   └── database/jobs_master.db  # SQLite database
+│   ├── database/jobs_master.db  # SQLite database
+│   └── logs/                    # scraper.log, cron.log, scraper.lock
 └── tests/
     └── test_scraper.py          # Unit tests
 ```
@@ -95,6 +96,7 @@ main.py → analyze_keywords()
 ### Search Templates (`config/settings.py`)
 12 predefined searches in `SEARCH_TEMPLATES` list with:
 - `keywords`, `location`, `experience_levels`, `remote`, `time_posted`, `max_results`
+- `time_posted` is set to `"1h"` (last hour) for hourly cron runs
 
 ### Keyword Settings (`config/keyword_settings.py`)
 ```python
@@ -247,6 +249,11 @@ print(f"Analyzed: {stats['total_analyzed']}, Avg score: {stats['avg_score']:.1f}
 - User-agent rotation
 - ~10-12 minutes for 200 jobs
 
+## Logging
+- `data/logs/scraper.log` — `RotatingFileHandler`, 5 MB max, 7 backups. Also mirrors to stdout.
+- `data/logs/cron.log` — stdout/stderr captured from cron runs via `run_scraper.sh`
+- `data/logs/scraper.lock` — PID lock file to prevent overlapping cron runs
+
 ## Known Limitations
 1. **Max ~60 jobs per search**: LinkedIn pagination not yet implemented
 2. **Rate limiting**: May get blocked if running too frequently
@@ -260,3 +267,45 @@ print(f"Analyzed: {stats['total_analyzed']}, Avg score: {stats['avg_score']:.1f}
 
 ## File Locations
 - Database: `data/database/jobs_master.db`
+- Logs: `data/logs/`
+
+## Server Deployment
+
+### Git-based deploy
+Push from local machine, pull on server:
+```bash
+# Local
+git push origin main
+
+# Server
+cd /home/edu/Job-Scraper && git pull
+```
+
+### Server setup (first time)
+```bash
+git clone <repo-url> /home/edu/Job-Scraper
+cd /home/edu/Job-Scraper
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+mkdir -p data/database data/logs
+```
+
+### Cron (hourly scraper)
+```bash
+crontab -e
+# Add:
+0 * * * * /home/edu/Job-Scraper/run_scraper.sh
+```
+`run_scraper.sh` activates the virtualenv, acquires a PID lock, runs `main.py`, and logs to `data/logs/cron.log`.
+
+### systemd (Flask web app)
+```bash
+sudo cp /home/edu/Job-Scraper/job-scraper-web.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable job-scraper-web
+sudo systemctl start job-scraper-web
+```
+
+### Note on data directory
+`data/` is gitignored — the database and logs are local per machine. Create `data/database/` and `data/logs/` manually on the server after cloning.
