@@ -5,9 +5,9 @@ After=network.target
 [Service]
 Type=simple
 User=edu
-WorkingDirectory=/home/edu/Job-Scraper
-Environment=PATH=/home/edu/Job-Scraper/venv/bin:/usr/bin:/bin
-ExecStart=/home/edu/Job-Scraper/venv/bin/python web_app.py
+WorkingDirectory=/home/edu/job-scraper
+Environment=PATH=/home/edu/job-scraper/venv/bin:/usr/bin:/bin
+ExecStart=/home/edu/job-scraper/venv/bin/python web_app.py
 Restart=on-failure
 RestartSec=5
 

@@ -278,13 +278,13 @@ Push from local machine, pull on server:
 git push origin main
 
 # Server
-cd /home/edu/Job-Scraper && git pull
+cd /home/edu/job-scraper && git pull
 ```
 
 ### Server setup (first time)
 ```bash
-git clone <repo-url> /home/edu/Job-Scraper
-cd /home/edu/Job-Scraper
+git clone <repo-url> /home/edu/job-scraper
+cd /home/edu/job-scraper
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -295,13 +295,13 @@ mkdir -p data/database data/logs
 ```bash
 crontab -e
 # Add:
-0 * * * * /home/edu/Job-Scraper/run_scraper.sh
+0 * * * * /home/edu/job-scraper/run_scraper.sh
 ```
 `run_scraper.sh` activates the virtualenv, acquires a PID lock, runs `main.py`, and logs to `data/logs/cron.log`.
 
 ### systemd (Flask web app)
 ```bash
-sudo cp /home/edu/Job-Scraper/job-scraper-web.service /etc/systemd/system/
+sudo cp /home/edu/job-scraper/job-scraper-web.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable job-scraper-web
 sudo systemctl start job-scraper-web
