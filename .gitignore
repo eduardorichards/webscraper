@@ -38,3 +38,7 @@ data/
 # Documentation
 next-tasks.txt
 *.pdf
+
+# Notes and snapshots
+notes.txt
+snapshots/
