@@ -2,6 +2,7 @@
 
 from ..models.job import Job
 from datetime import datetime
+from urllib.parse import urlparse, urlunparse
 
 
 class LinkedInExtractor:
@@ -40,6 +41,9 @@ class LinkedInExtractor:
         company_element = card.find('h4', class_='base-search-card__subtitle')
         if company_element:
             job['company'] = company_element.get_text().strip()
+            company_url = self._extract_company_url(company_element)
+            if company_url:
+                job['company_url'] = company_url
         
         location = self._extract_location(card)
         job['location'] = location
@@ -123,7 +127,25 @@ class LinkedInExtractor:
         # If it's days, weeks, months - no specific time available
         return 'Not specified'
         
-    def _extract_job_url(self, card):  
+    def _extract_company_url(self, company_element):
+        """Extract company LinkedIn profile URL from the company name link."""
+        link = company_element.find('a')
+        if not link:
+            return None
+        href = link.get('href')
+        if not href or '/company/' not in href:
+            return None
+        # Normalize domain and strip tracking query params
+        parsed = urlparse(href)
+        clean_url = urlunparse((
+            parsed.scheme or 'https',
+            'www.linkedin.com',
+            parsed.path,
+            '', '', ''
+        ))
+        return clean_url
+
+    def _extract_job_url(self, card):
             """Extract job URL from job card"""
 
             title_link = card.find('a', class_='job-card-container__link')

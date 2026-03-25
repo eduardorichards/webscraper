@@ -31,13 +31,20 @@ class SQLiteStorage:
             location TEXT,
             posted_date TEXT,
             job_url TEXT UNIQUE,
+            company_url TEXT,
             search_keywords TEXT,
             search_location TEXT,
             search_experience TEXT,
             search_remote TEXT
         )
         """)
-        
+
+        # Migrate: add company_url column if missing (existing DBs)
+        cursor.execute(f"PRAGMA table_info({self.table_name})")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        if 'company_url' not in existing_cols:
+            cursor.execute(f"ALTER TABLE {self.table_name} ADD COLUMN company_url TEXT")
+
         conn.commit()
         conn.close()
 
@@ -170,15 +177,16 @@ class SQLiteStorage:
                 # Insert job into the database
                 cursor.execute(f"""
                 INSERT INTO {self.table_name} (
-                    title, company, location, posted_date, job_url,
+                    title, company, location, posted_date, job_url, company_url,
                     search_keywords, search_location, search_experience, search_remote
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     job.title,
                     job.company,
                     job.location,
                     job.posted_date,
                     job.job_url,
+                    job.company_url,
                     search_config.keywords,
                     search_config.location,
                     ','.join(map(str, search_config.experience_levels)) if search_config.experience_levels else '',
