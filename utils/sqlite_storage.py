@@ -1,7 +1,7 @@
 """SQLite storage for job search results with duplicate prevention."""
 import sqlite3
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class SQLiteStorage:
@@ -334,7 +334,7 @@ class SQLiteStorage:
             match_result.weighted_score,
             matched_keywords_str,
             match_result.match_percentage,
-            datetime.now().isoformat(),
+            datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
             match_result.scrape_status
         ))
 
