@@ -61,6 +61,7 @@ class JobScraper:
         
         for i, job in enumerate(jobs, 1):
             print(f"--- JOB {i} ---")
+            print(f"🆔 Job ID: {job.linkedin_job_id}")
             print(f"📋 Title: {job.title}")
             print(f"🏢 Company: {job.company}")
             print(f"📍 Location: {job.location}")

@@ -4,7 +4,7 @@
 class MatchResult:
     """Stores keyword match analysis results for a single job."""
 
-    def __init__(self, job_id, job_url, title=None, company=None):
+    def __init__(self, job_id, job_url, title=None, company=None, linkedin_job_id=None):
         """
         Initialize match result.
 
@@ -13,11 +13,13 @@ class MatchResult:
             job_url: URL of the job posting
             title: Job title (optional, for display)
             company: Company name (optional, for display)
+            linkedin_job_id: LinkedIn's unique numeric job ID
         """
         self.job_id = job_id
         self.job_url = job_url
         self.title = title
         self.company = company
+        self.linkedin_job_id = linkedin_job_id
 
         # Scraped data
         self.description = None
@@ -63,6 +65,7 @@ class MatchResult:
         return {
             'job_id': self.job_id,
             'job_url': self.job_url,
+            'linkedin_job_id': self.linkedin_job_id,
             'title': self.title,
             'company': self.company,
             'description': self.description,

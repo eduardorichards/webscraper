@@ -3,6 +3,7 @@
 from ..models.job import Job
 from datetime import datetime
 from urllib.parse import urlparse, urlunparse
+import re
 
 
 class LinkedInExtractor:
@@ -55,11 +56,13 @@ class LinkedInExtractor:
         if posted_time:
             job['posted_time'] = posted_time
         
-        # Job URL
-        job_url = self._extract_job_url(card)
+        # Job URL and LinkedIn Job ID
+        job_url, linkedin_job_id = self._extract_job_url(card)
         if job_url:
             job['job_url'] = job_url
-        
+        if linkedin_job_id:
+            job['linkedin_job_id'] = linkedin_job_id
+
         return job
     
     def _extract_location(self, card):
@@ -146,32 +149,38 @@ class LinkedInExtractor:
         return clean_url
 
     def _extract_job_url(self, card):
-            """Extract job URL from job card"""
+        """Extract job URL and LinkedIn job ID from job card.
 
-            title_link = card.find('a', class_='job-card-container__link')
-            if title_link:
-                href = title_link.get('href')
-                if href:
-                    if href.startswith('/'):
-                        # Force www.linkedin.com instead of country-specific domain
-                        return f"https://www.linkedin.com{href}"
-                    else:
-                        # Replace country-specific domain with global
-                        if 'ar.linkedin.com' in href:
-                            return href.replace('ar.linkedin.com', 'www.linkedin.com')
-                        return href
-            
-            # Alternative: Look for any link containing '/jobs/view/'
-            all_links = card.find_all('a')
-            for link in all_links:
-                href = link.get('href', '')
-                if '/jobs/view/' in href:
-                    if href.startswith('/'):
-                        return f"https://www.linkedin.com{href}"
-                    else:
-                        # Replace country-specific domain
-                        if 'ar.linkedin.com' in href:
-                            return href.replace('ar.linkedin.com', 'www.linkedin.com')
-                        return href
-            
-            return 'Not found'
+        Returns:
+            tuple: (clean_url, linkedin_job_id) or ('Not found', None)
+        """
+        title_link = card.find('a', class_='job-card-container__link')
+        if title_link:
+            href = title_link.get('href')
+            if href:
+                result = self._build_clean_job_url(href)
+                if result:
+                    return result
+
+        # Fallback: Look for any link containing '/jobs/view/'
+        all_links = card.find_all('a')
+        for link in all_links:
+            href = link.get('href', '')
+            if '/jobs/view/' in href:
+                result = self._build_clean_job_url(href)
+                if result:
+                    return result
+
+        return 'Not found', None
+
+    def _build_clean_job_url(self, href):
+        """Extract job ID from a LinkedIn URL and return a clean URL + ID.
+
+        Returns:
+            tuple: (clean_url, job_id) or None if no job ID found.
+        """
+        match = re.search(r'/jobs/view/[^/]*?(\d{5,})', href)
+        if match:
+            job_id = match.group(1)
+            return f"https://www.linkedin.com/jobs/view/{job_id}/", job_id
+        return None

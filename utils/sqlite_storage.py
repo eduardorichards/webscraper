@@ -26,11 +26,12 @@ class SQLiteStorage:
         cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS {self.table_name} (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            linkedin_job_id TEXT UNIQUE,
             title TEXT,
             company TEXT,
             location TEXT,
             posted_date TEXT,
-            job_url TEXT UNIQUE,
+            job_url TEXT,
             company_url TEXT,
             search_keywords TEXT,
             search_location TEXT,
@@ -61,6 +62,7 @@ class SQLiteStorage:
         CREATE TABLE IF NOT EXISTS job_analyses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_id INTEGER NOT NULL,
+            linkedin_job_id TEXT,
             job_name TEXT,
             company TEXT,
             job_url TEXT,
@@ -122,6 +124,7 @@ class SQLiteStorage:
         CREATE VIEW job_summary AS
         SELECT
             ja.id,
+            j.linkedin_job_id,
             ja.job_name,
             ja.company,
             ja.description,
@@ -141,7 +144,7 @@ class SQLiteStorage:
         cursor.execute("DROP VIEW IF EXISTS job_summary_unique")
         cursor.execute("""
         CREATE VIEW job_summary_unique AS
-        SELECT id, job_name, company, description, total_matches,
+        SELECT id, linkedin_job_id, job_name, company, description, total_matches,
                applicant_count, weighted_score, match_percentage, analyzed_at, url
         FROM (
             SELECT *,
@@ -177,10 +180,11 @@ class SQLiteStorage:
                 # Insert job into the database
                 cursor.execute(f"""
                 INSERT INTO {self.table_name} (
-                    title, company, location, posted_date, job_url, company_url,
+                    linkedin_job_id, title, company, location, posted_date, job_url, company_url,
                     search_keywords, search_location, search_experience, search_remote
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
+                    job.linkedin_job_id,
                     job.title,
                     job.company,
                     job.location,
@@ -194,7 +198,7 @@ class SQLiteStorage:
                 ))
                 new_jobs.append(job)
             except sqlite3.IntegrityError:
-                # Duplicate job_url, skip
+                # Duplicate linkedin_job_id, skip
                 duplicate_by_url += 1
                 continue
         
@@ -287,7 +291,7 @@ class SQLiteStorage:
                     ) as row_num
                 FROM {self.table_name} j
             )
-            SELECT rj.id, rj.title, rj.company, rj.location, rj.posted_date,
+            SELECT rj.id, rj.linkedin_job_id, rj.title, rj.company, rj.location, rj.posted_date,
                    rj.job_url, rj.search_keywords, rj.search_location,
                    rj.search_experience, rj.search_remote
             FROM ranked_jobs rj
@@ -315,14 +319,15 @@ class SQLiteStorage:
 
         cursor.execute("""
             INSERT OR REPLACE INTO job_analyses (
-                job_id, job_name, company, job_url, description, applicant_count,
+                job_id, linkedin_job_id, job_name, company, job_url, description, applicant_count,
                 employment_type, job_function,
                 total_matches, weighted_score,
                 matched_keywords, match_percentage,
                 analyzed_at, scrape_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             match_result.job_id,
+            match_result.linkedin_job_id,
             match_result.title,
             match_result.company,
             match_result.job_url,
@@ -361,7 +366,7 @@ class SQLiteStorage:
 
         query = f"""
             SELECT
-                j.id, j.title, j.company, j.location, j.posted_date, j.job_url,
+                j.id, j.linkedin_job_id, j.title, j.company, j.location, j.posted_date, j.job_url,
                 ja.description, ja.applicant_count,
                 ja.employment_type, ja.total_matches,
                 ja.weighted_score, ja.matched_keywords, ja.match_percentage,
@@ -475,7 +480,7 @@ class SQLiteStorage:
 
         # Define column order
         columns = [
-            'id', 'job_name', 'company', 'description', 'total_matches',
+            'id', 'linkedin_job_id', 'job_name', 'company', 'description', 'total_matches',
             'applicant_count', 'weighted_score', 'match_percentage',
             'analyzed_at', 'url'
         ]

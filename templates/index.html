@@ -52,6 +52,7 @@
             <thead>
                 <tr>
                     <th data-sort="number">ID <span class="arrow">&#9650;</span></th>
+                    <th data-sort="string">Job ID <span class="arrow">&#9650;</span></th>
                     <th data-sort="string">Job Name <span class="arrow">&#9650;</span></th>
                     <th data-sort="string">Company <span class="arrow">&#9650;</span></th>
                     <th data-sort="string">Description <span class="arrow">&#9650;</span></th>
@@ -67,6 +68,7 @@
                 {% for job in jobs %}
                 <tr>
                     <td>{{ job.id }}</td>
+                    <td>{{ job.linkedin_job_id or "-" }}</td>
                     <td title="{{ job.job_name or '' }}">{{ job.job_name or "-" }}</td>
                     <td title="{{ job.company or '' }}">{{ job.company or "-" }}</td>
                     <td class="description-cell" title="{{ job.description or '' }}">{{ job.description[:100] ~ "..." if job.description and job.description|length > 100 else job.description or "-" }}</td>

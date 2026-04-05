@@ -59,7 +59,8 @@ class KeywordMatcher:
                 job_id=job_id,
                 job_url=job_url,
                 title=job.get('title'),
-                company=job.get('company')
+                company=job.get('company'),
+                linkedin_job_id=job.get('linkedin_job_id')
             )
 
             # Scrape job details
