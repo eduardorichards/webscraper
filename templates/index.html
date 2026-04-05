@@ -19,6 +19,7 @@
         th .arrow { margin-left: 0.3rem; opacity: 0.4; }
         th.active .arrow { opacity: 1; }
         td { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .filter-row th { padding: 0.3rem 0.4rem; border-bottom: none; }
     </style>
 </head>
 <body>
@@ -33,22 +34,36 @@
 
     <form class="controls" method="get" id="filterForm">
         <label>
-            <input type="checkbox" name="unique" value="1" {{ "checked" if unique }}
-                   onchange="this.form.submit()">
-            Deduplicate
-        </label>
-        <label>
             Min score:
             <input type="number" name="min_score" value="{{ min_score }}" step="0.5" min="0"
                    onchange="this.form.submit()">
         </label>
         <small>{{ jobs|length }} jobs shown</small>
+        <small id="visibleCount"></small>
     </form>
 
     {% if jobs %}
     <figure>
         <table role="grid" id="jobTable">
             <thead>
+                <tr class="filter-row">
+                    <th></th>
+                    <th></th>
+                    <th></th>
+                    <th><input type="text" id="locationFilter" placeholder="Filter..." style="margin:0; padding:0.2rem 0.4rem; font-size:0.8rem;"></th>
+                    <th style="white-space: nowrap;">
+                        <input type="number" id="timeValue" min="1" placeholder="#" style="margin:0; padding:0.2rem 0.4rem; font-size:0.8rem; width:3.5rem; display:inline-block;">
+                        <select id="timeUnit" style="margin:0; padding:0.2rem 0.3rem; font-size:0.8rem; width:auto; display:inline-block;">
+                            <option value="hours">hrs</option>
+                            <option value="days">days</option>
+                        </select>
+                    </th>
+                    <th></th>
+                    <th></th>
+                    <th></th>
+                    <th></th>
+                    <th></th>
+                </tr>
                 <tr>
                     <th data-sort="string">Job ID <span class="arrow">&#9650;</span></th>
                     <th data-sort="string">Title <span class="arrow">&#9650;</span></th>
@@ -155,17 +170,47 @@
             });
         });
 
-        // Handle unchecked deduplicate
-        document.getElementById("filterForm").addEventListener("submit", function(e) {
-            const cb = this.querySelector('input[name="unique"]');
-            if (!cb.checked) {
-                const hidden = document.createElement("input");
-                hidden.type = "hidden";
-                hidden.name = "unique";
-                hidden.value = "0";
-                this.appendChild(hidden);
+        // Client-side filtering
+        var locationInput = document.getElementById("locationFilter");
+        var timeValue = document.getElementById("timeValue");
+        var timeUnit = document.getElementById("timeUnit");
+        var visibleCount = document.getElementById("visibleCount");
+
+        function applyFilters() {
+            if (!table) return;
+            var locQuery = locationInput.value.trim().toLowerCase();
+            var hours = parseFloat(timeValue.value);
+            var cutoff = null;
+            if (!isNaN(hours) && hours > 0) {
+                var ms = timeUnit.value === "days" ? hours * 86400000 : hours * 3600000;
+                cutoff = Date.now() - ms;
             }
-        });
+
+            var rows = table.querySelectorAll("tbody tr");
+            var shown = 0;
+            rows.forEach(function(row) {
+                var loc = row.children[3].textContent.trim().toLowerCase();
+                var utc = row.children[4].dataset.utc;
+
+                var locMatch = !locQuery || loc.includes(locQuery);
+                var dateMatch = true;
+                if (cutoff && utc) {
+                    var ts = new Date(utc.endsWith("Z") || utc.includes("+") ? utc : utc + "Z").getTime();
+                    dateMatch = !isNaN(ts) && ts >= cutoff;
+                } else if (cutoff && !utc) {
+                    dateMatch = false;
+                }
+
+                var visible = locMatch && dateMatch;
+                row.style.display = visible ? "" : "none";
+                if (visible) shown++;
+            });
+            visibleCount.textContent = shown + " of " + rows.length + " visible";
+        }
+
+        locationInput.addEventListener("input", applyFilters);
+        timeValue.addEventListener("input", applyFilters);
+        timeUnit.addEventListener("change", applyFilters);
     });
     </script>
 </body>
