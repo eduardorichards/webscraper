@@ -59,7 +59,7 @@
                     <th data-sort="number">Applicants <span class="arrow">&#9650;</span></th>
                     <th data-sort="number">Score <span class="arrow">&#9650;</span></th>
                     <th data-sort="number">Match % <span class="arrow">&#9650;</span></th>
-                    <th data-sort="string">Analyzed At <span class="arrow">&#9650;</span></th>
+                    <th data-sort="date">Analyzed At <span class="arrow">&#9650;</span></th>
                     <th>Link</th>
                 </tr>
             </thead>
@@ -130,7 +130,13 @@
                     let aVal = a.children[index].textContent.trim();
                     let bVal = b.children[index].textContent.trim();
 
-                    if (type === "number") {
+                    if (type === "date") {
+                        let aTime = a.children[index].dataset.utc;
+                        let bTime = b.children[index].dataset.utc;
+                        let aNum = aTime ? new Date(aTime).getTime() : (ascending ? Infinity : -Infinity);
+                        let bNum = bTime ? new Date(bTime).getTime() : (ascending ? Infinity : -Infinity);
+                        return ascending ? aNum - bNum : bNum - aNum;
+                    } else if (type === "number") {
                         let aNum = parseFloat(aVal.replace("%", ""));
                         let bNum = parseFloat(bVal.replace("%", ""));
                         if (isNaN(aNum)) aNum = ascending ? Infinity : -Infinity;
