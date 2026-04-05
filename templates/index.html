@@ -19,7 +19,6 @@
         th .arrow { margin-left: 0.3rem; opacity: 0.4; }
         th.active .arrow { opacity: 1; }
         td { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        td.description-cell { max-width: 300px; white-space: normal; }
     </style>
 </head>
 <body>
@@ -51,35 +50,35 @@
         <table role="grid" id="jobTable">
             <thead>
                 <tr>
-                    <th data-sort="number">ID <span class="arrow">&#9650;</span></th>
                     <th data-sort="string">Job ID <span class="arrow">&#9650;</span></th>
-                    <th data-sort="string">Job Name <span class="arrow">&#9650;</span></th>
+                    <th data-sort="string">Title <span class="arrow">&#9650;</span></th>
                     <th data-sort="string">Company <span class="arrow">&#9650;</span></th>
-                    <th data-sort="string">Description <span class="arrow">&#9650;</span></th>
-                    <th data-sort="number">Matches <span class="arrow">&#9650;</span></th>
+                    <th data-sort="string">Location <span class="arrow">&#9650;</span></th>
+                    <th data-sort="date">Date <span class="arrow">&#9650;</span></th>
                     <th data-sort="number">Applicants <span class="arrow">&#9650;</span></th>
+                    <th data-sort="number">Matches <span class="arrow">&#9650;</span></th>
                     <th data-sort="number">Score <span class="arrow">&#9650;</span></th>
+
                     <th data-sort="number">Match % <span class="arrow">&#9650;</span></th>
-                    <th data-sort="date">Analyzed At <span class="arrow">&#9650;</span></th>
                     <th>Link</th>
                 </tr>
             </thead>
             <tbody>
                 {% for job in jobs %}
                 <tr>
-                    <td>{{ job.id }}</td>
                     <td>{{ job.linkedin_job_id or "-" }}</td>
-                    <td title="{{ job.job_name or '' }}">{{ job.job_name or "-" }}</td>
+                    <td title="{{ job.title or '' }}">{{ job.title or "-" }}</td>
                     <td title="{{ job.company or '' }}">{{ job.company or "-" }}</td>
-                    <td class="description-cell" title="{{ job.description or '' }}">{{ job.description[:100] ~ "..." if job.description and job.description|length > 100 else job.description or "-" }}</td>
-                    <td>{{ job.total_matches if job.total_matches is not none else "-" }}</td>
+                    <td title="{{ job.location or '' }}">{{ job.location or "-" }}</td>
+                    <td class="utc-time" data-utc="{{ job.date_time or '' }}">{{ job.date_time or "-" }}</td>
                     <td>{{ job.applicant_count if job.applicant_count is not none else "-" }}</td>
+                    <td>{{ job.total_matches if job.total_matches is not none else "-" }}</td>
                     <td>{{ "%.1f"|format(job.weighted_score) if job.weighted_score is not none else "-" }}</td>
+
                     <td>{{ "%.1f"|format(job.match_percentage) ~ "%" if job.match_percentage is not none else "-" }}</td>
-                    <td class="utc-time" data-utc="{{ job.analyzed_at or '' }}">{{ job.analyzed_at or "-" }}</td>
                     <td>
-                        {% if job.url %}
-                        <a href="{{ job.url }}" target="_blank" rel="noopener">View</a>
+                        {% if job.linkedin_job_id %}
+                        <a href="https://www.linkedin.com/jobs/view/{{ job.linkedin_job_id }}/" target="_blank" rel="noopener">View</a>
                         {% else %}-{% endif %}
                     </td>
                 </tr>
@@ -97,7 +96,6 @@
         document.querySelectorAll(".utc-time").forEach(function(td) {
             var utc = td.dataset.utc;
             if (!utc || utc === "-") return;
-            // Handle both "Z" suffix and bare ISO strings (legacy data assumed UTC)
             if (!utc.endsWith("Z") && !utc.includes("+")) utc += "Z";
             var date = new Date(utc);
             if (isNaN(date)) return;
@@ -157,7 +155,7 @@
             });
         });
 
-        // Handle unchecked deduplicate: if checkbox unchecked, still pass unique=0
+        // Handle unchecked deduplicate
         document.getElementById("filterForm").addEventListener("submit", function(e) {
             const cb = this.querySelector('input[name="unique"]');
             if (!cb.checked) {

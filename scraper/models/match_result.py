@@ -1,24 +1,14 @@
 """Model for storing keyword match results for a job."""
 
+from datetime import datetime, timezone
+
+LINKEDIN_JOB_BASE_URL = "https://www.linkedin.com/jobs/view/"
+
 
 class MatchResult:
-    """Stores keyword match analysis results for a single job."""
+    """Stores keyword match analysis results for a single job post."""
 
-    def __init__(self, job_id, job_url, title=None, company=None, linkedin_job_id=None):
-        """
-        Initialize match result.
-
-        Args:
-            job_id: Database ID of the job
-            job_url: URL of the job posting
-            title: Job title (optional, for display)
-            company: Company name (optional, for display)
-            linkedin_job_id: LinkedIn's unique numeric job ID
-        """
-        self.job_id = job_id
-        self.job_url = job_url
-        self.title = title
-        self.company = company
+    def __init__(self, linkedin_job_id):
         self.linkedin_job_id = linkedin_job_id
 
         # Scraped data
@@ -26,6 +16,9 @@ class MatchResult:
         self.applicant_count = None
         self.employment_type = None
         self.job_function = None
+        self.seniority_level = None
+        self.industries = None
+        self.date_time = None  # Timestamp when the job page was scraped
 
         # Match results
         self.keyword_matches = {}  # {keyword: count}
@@ -34,16 +27,13 @@ class MatchResult:
         self.matched_keywords = []  # Keywords found at least once
         self.match_percentage = 0.0
 
-        # Status
-        self.scrape_status = 'pending'  # 'pending', 'success', 'failed'
+    @property
+    def job_url(self):
+        """Construct job URL from linkedin_job_id."""
+        return f"{LINKEDIN_JOB_BASE_URL}{self.linkedin_job_id}/"
 
     def calculate_score(self, keyword_config):
-        """
-        Calculate weighted score based on matches and weights.
-
-        Args:
-            keyword_config: KeywordConfig instance with weights
-        """
+        """Calculate weighted score based on matches and weights."""
         self.total_matches = sum(self.keyword_matches.values())
         self.matched_keywords = [k for k, v in self.keyword_matches.items() if v > 0]
 
@@ -54,7 +44,6 @@ class MatchResult:
         else:
             self.match_percentage = 0.0
 
-        # Weighted score: sum of (count * weight) for each keyword
         self.weighted_score = sum(
             count * keyword_config.weights.get(kw, 1.0)
             for kw, count in self.keyword_matches.items()
@@ -63,24 +52,22 @@ class MatchResult:
     def to_dict(self):
         """Convert result to dictionary for storage."""
         return {
-            'job_id': self.job_id,
-            'job_url': self.job_url,
             'linkedin_job_id': self.linkedin_job_id,
-            'title': self.title,
-            'company': self.company,
             'description': self.description,
             'applicant_count': self.applicant_count,
-            'employment_type': self.employment_type,
-            'job_function': self.job_function,
+            'date_time': self.date_time,
             'total_matches': self.total_matches,
             'weighted_score': self.weighted_score,
             'matched_keywords': self.matched_keywords,
             'match_percentage': self.match_percentage,
-            'scrape_status': self.scrape_status,
+            'employment_type': self.employment_type,
+            'job_function': self.job_function,
+            'seniority_level': self.seniority_level,
+            'industries': self.industries,
         }
 
     def __repr__(self):
         return (
-            f"MatchResult(job_id={self.job_id}, score={self.weighted_score:.1f}, "
-            f"match={self.match_percentage:.0f}%)"
+            f"MatchResult(linkedin_job_id={self.linkedin_job_id}, "
+            f"score={self.weighted_score:.1f}, match={self.match_percentage:.0f}%)"
         )

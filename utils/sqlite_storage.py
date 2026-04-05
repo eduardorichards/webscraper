@@ -3,35 +3,33 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime, timezone
 
+LINKEDIN_JOB_BASE_URL = "https://www.linkedin.com/jobs/view/"
+
 
 class SQLiteStorage:
     def __init__(self, db_file=None):
         if db_file is None:
-            # Save to a directory inside the project: data/database
-            project_root = Path(__file__).resolve().parent.parent  # Go to the project root
+            project_root = Path(__file__).resolve().parent.parent
             data_folder = project_root / 'data' / 'database'
-            data_folder.mkdir(parents=True, exist_ok=True)  # Ensure the directory exists
+            data_folder.mkdir(parents=True, exist_ok=True)
             db_file = data_folder / 'jobs_master.db'
-        
+
         self.db_file = Path(db_file)
-        self.table_name = 'jobs'
         self._ensure_db_exists()
-    
+
     def _ensure_db_exists(self):
-        """Create SQLite database and table if it doesn't exist"""
+        """Create SQLite database and tables if they don't exist."""
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
-        
-        # Create table if it doesn't exist
-        cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS {self.table_name} (
+
+        # Table 1: Search results (linkedin_job_id is NOT unique)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS job_searches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            linkedin_job_id TEXT UNIQUE,
+            linkedin_job_id TEXT,
             title TEXT,
             company TEXT,
             location TEXT,
-            posted_date TEXT,
-            job_url TEXT,
             company_url TEXT,
             search_keywords TEXT,
             search_location TEXT,
@@ -40,116 +38,66 @@ class SQLiteStorage:
         )
         """)
 
-        # Migrate: add company_url column if missing (existing DBs)
-        cursor.execute(f"PRAGMA table_info({self.table_name})")
-        existing_cols = {row[1] for row in cursor.fetchall()}
-        if 'company_url' not in existing_cols:
-            cursor.execute(f"ALTER TABLE {self.table_name} ADD COLUMN company_url TEXT")
-
-        conn.commit()
-        conn.close()
-
-        # Also ensure job_analyses table exists
-        self._ensure_analyses_table_exists()
-        print(f"✅ SQLite database ready at: {self.db_file}")
-
-    def _ensure_analyses_table_exists(self):
-        """Create job_analyses table if it doesn't exist."""
-        conn = sqlite3.connect(self.db_file)
-        cursor = conn.cursor()
-
+        # Table 2: Job post details (linkedin_job_id IS unique)
         cursor.execute("""
-        CREATE TABLE IF NOT EXISTS job_analyses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_id INTEGER NOT NULL,
-            linkedin_job_id TEXT,
-            job_name TEXT,
-            company TEXT,
-            job_url TEXT,
+        CREATE TABLE IF NOT EXISTS job_posts (
+            linkedin_job_id TEXT UNIQUE NOT NULL,
             description TEXT,
             applicant_count INTEGER,
-            employment_type TEXT,
-            job_function TEXT,
+            date_time TIMESTAMP,
             total_matches INTEGER,
             weighted_score REAL,
             matched_keywords TEXT,
             match_percentage REAL,
-            analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            scrape_status TEXT DEFAULT 'pending',
-            FOREIGN KEY (job_id) REFERENCES jobs(id),
-            UNIQUE(job_id)
+            employment_type TEXT,
+            job_function TEXT,
+            seniority_level TEXT,
+            industries TEXT
         )
         """)
 
-        # Migrate: add missing columns if needed
-        cursor.execute("PRAGMA table_info(job_analyses)")
-        existing_cols = {row[1] for row in cursor.fetchall()}
-        if 'job_name' not in existing_cols:
-            cursor.execute("ALTER TABLE job_analyses ADD COLUMN job_name TEXT")
-        if 'company' not in existing_cols:
-            cursor.execute("ALTER TABLE job_analyses ADD COLUMN company TEXT")
-        if 'job_url' not in existing_cols:
-            cursor.execute("ALTER TABLE job_analyses ADD COLUMN job_url TEXT")
-
-        # Backfill job_name, company, and job_url from jobs table for existing rows
+        # Indexes
         cursor.execute("""
-            UPDATE job_analyses SET job_name = (
-                SELECT j.title FROM jobs j WHERE j.id = job_analyses.job_id
-            ) WHERE job_name IS NULL
+        CREATE INDEX IF NOT EXISTS idx_job_searches_linkedin_id
+        ON job_searches(linkedin_job_id)
         """)
         cursor.execute("""
-            UPDATE job_analyses SET company = (
-                SELECT j.company FROM jobs j WHERE j.id = job_analyses.job_id
-            ) WHERE company IS NULL
-        """)
-        cursor.execute("""
-            UPDATE job_analyses SET job_url = (
-                SELECT j.job_url FROM jobs j WHERE j.id = job_analyses.job_id
-            ) WHERE job_url IS NULL
+        CREATE INDEX IF NOT EXISTS idx_job_posts_score
+        ON job_posts(weighted_score DESC)
         """)
 
-        # Create index for faster queries
-        cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_job_analyses_score
-        ON job_analyses(weighted_score DESC)
-        """)
-        cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_job_analyses_job_id
-        ON job_analyses(job_id)
-        """)
-
-        # Create view for easy querying of combined job + analysis data
+        # View: combined job data for display
         cursor.execute("DROP VIEW IF EXISTS job_summary")
         cursor.execute("""
         CREATE VIEW job_summary AS
         SELECT
-            ja.id,
-            j.linkedin_job_id,
-            ja.job_name,
-            ja.company,
-            ja.description,
-            ja.total_matches,
-            ja.applicant_count,
-            ja.weighted_score,
-            ja.match_percentage,
-            ja.analyzed_at,
-            j.job_url AS url
-        FROM job_analyses ja
-        INNER JOIN jobs j ON j.id = ja.job_id
-        ORDER BY ja.weighted_score DESC
+            jp.linkedin_job_id,
+            js.title,
+            js.company,
+            js.location,
+            jp.date_time,
+            jp.applicant_count,
+            jp.weighted_score,
+            jp.match_percentage,
+            jp.total_matches,
+            jp.matched_keywords
+        FROM job_posts jp
+        INNER JOIN job_searches js ON js.linkedin_job_id = jp.linkedin_job_id
+        GROUP BY jp.linkedin_job_id
+        ORDER BY jp.weighted_score DESC
         """)
 
-        # Create deduplicated view - keeps max 2 per (job_role, company)
-        # Keeps the ones with lowest applicant count
+        # Deduplicated view: max 2 per (title, company)
         cursor.execute("DROP VIEW IF EXISTS job_summary_unique")
         cursor.execute("""
         CREATE VIEW job_summary_unique AS
-        SELECT id, linkedin_job_id, job_name, company, description, total_matches,
-               applicant_count, weighted_score, match_percentage, analyzed_at, url
+        SELECT linkedin_job_id, title, company, location, date_time,
+               applicant_count, weighted_score, match_percentage,
+               total_matches, matched_keywords
         FROM (
             SELECT *,
                 ROW_NUMBER() OVER (
-                    PARTITION BY job_name, company
+                    PARTITION BY title, company
                     ORDER BY
                         CASE WHEN applicant_count IS NULL THEN 1 ELSE 0 END,
                         applicant_count ASC
@@ -162,78 +110,67 @@ class SQLiteStorage:
 
         conn.commit()
         conn.close()
-    
+        print(f"✅ SQLite database ready at: {self.db_file}")
+
     def append_jobs(self, jobs, search_config):
-        """Insert new jobs into the database, avoiding duplicates"""
+        """Insert search results into job_searches table."""
         if not jobs:
             print("No jobs to append to SQLite database")
             return
-        
+
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
-        
-        new_jobs = []
-        duplicate_by_url = 0
-        
+
+        added = 0
         for job in jobs:
-            try:
-                # Insert job into the database
-                cursor.execute(f"""
-                INSERT INTO {self.table_name} (
-                    linkedin_job_id, title, company, location, posted_date, job_url, company_url,
-                    search_keywords, search_location, search_experience, search_remote
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    job.linkedin_job_id,
-                    job.title,
-                    job.company,
-                    job.location,
-                    job.posted_date,
-                    job.job_url,
-                    job.company_url,
-                    search_config.keywords,
-                    search_config.location,
-                    ','.join(map(str, search_config.experience_levels)) if search_config.experience_levels else '',
-                    'Yes' if search_config.remote else 'No'
-                ))
-                new_jobs.append(job)
-            except sqlite3.IntegrityError:
-                # Duplicate linkedin_job_id, skip
-                duplicate_by_url += 1
-                continue
-        
+            cursor.execute("""
+            INSERT INTO job_searches (
+                linkedin_job_id, title, company, location, company_url,
+                search_keywords, search_location, search_experience, search_remote
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                job.linkedin_job_id,
+                job.title,
+                job.company,
+                job.location,
+                job.company_url,
+                search_config.keywords,
+                search_config.location,
+                ','.join(map(str, search_config.experience_levels)) if search_config.experience_levels else '',
+                'Yes' if search_config.remote else 'No'
+            ))
+            added += 1
+
         conn.commit()
         conn.close()
-        
-        print(f"✅ Added {len(new_jobs)} new jobs to SQLite database")
-        if duplicate_by_url > 0:
-            print(f"⚠️  Skipped {duplicate_by_url} duplicate jobs by URL")
-    
+
+        print(f"✅ Added {added} search results to SQLite database")
+
     def get_total_jobs(self):
-        """Get total number of jobs in the database"""
+        """Get total number of unique linkedin_job_ids in searches."""
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
-        
-        cursor.execute(f"SELECT COUNT(*) FROM {self.table_name}")
-        total_jobs = cursor.fetchone()[0]
-        
+
+        cursor.execute("SELECT COUNT(DISTINCT linkedin_job_id) FROM job_searches")
+        total = cursor.fetchone()[0]
+
         conn.close()
-        return total_jobs
-    
+        return total
+
     def get_stats(self):
-        """Get statistics about stored jobs"""
+        """Get statistics about stored jobs."""
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
-        
-        cursor.execute(f"SELECT COUNT(*) FROM {self.table_name}")
+
+        cursor.execute("SELECT COUNT(DISTINCT linkedin_job_id) FROM job_searches")
         total_jobs = cursor.fetchone()[0]
-        
-        cursor.execute(f"SELECT COUNT(DISTINCT company) FROM {self.table_name}")
+
+        cursor.execute("SELECT COUNT(DISTINCT company) FROM job_searches")
         unique_companies = cursor.fetchone()[0]
-        
-        cursor.execute(f"SELECT COUNT(DISTINCT location) FROM {self.table_name}")
+
+        cursor.execute("SELECT COUNT(DISTINCT location) FROM job_searches")
         unique_locations = cursor.fetchone()[0]
-        
+
         conn.close()
         return {
             'total_jobs': total_jobs,
@@ -242,63 +179,31 @@ class SQLiteStorage:
             'file_path': self.db_file
         }
 
-    def get_all_jobs(self):
-        """Get all jobs from the database."""
-        conn = sqlite3.connect(self.db_file)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        cursor.execute(f"SELECT * FROM {self.table_name}")
-        rows = cursor.fetchall()
-
-        conn.close()
-        return [dict(row) for row in rows]
-
-    def get_jobs_by_ids(self, job_ids):
-        """Get jobs by their IDs."""
-        if not job_ids:
-            return []
-
-        conn = sqlite3.connect(self.db_file)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
-        placeholders = ','.join('?' * len(job_ids))
-        cursor.execute(
-            f"SELECT * FROM {self.table_name} WHERE id IN ({placeholders})",
-            job_ids
-        )
-        rows = cursor.fetchall()
-
-        conn.close()
-        return [dict(row) for row in rows]
-
     def get_jobs_without_analysis(self):
         """
-        Get jobs that haven't been analyzed yet.
-        Returns max 2 jobs per (title, company) pair to avoid analyzing excessive duplicates.
+        Get distinct linkedin_job_ids that haven't been analyzed yet.
+        Returns max 2 per (title, company) pair to avoid analyzing excessive duplicates.
         """
         conn = sqlite3.connect(self.db_file)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        cursor.execute(f"""
-            WITH ranked_jobs AS (
-                SELECT j.*,
+        cursor.execute("""
+            WITH unique_jobs AS (
+                SELECT linkedin_job_id, title, company,
                     ROW_NUMBER() OVER (
-                        PARTITION BY j.title, j.company
-                        ORDER BY j.id ASC
+                        PARTITION BY title, company
+                        ORDER BY id ASC
                     ) as row_num
-                FROM {self.table_name} j
+                FROM job_searches
+                GROUP BY linkedin_job_id
             )
-            SELECT rj.id, rj.linkedin_job_id, rj.title, rj.company, rj.location, rj.posted_date,
-                   rj.job_url, rj.search_keywords, rj.search_location,
-                   rj.search_experience, rj.search_remote
-            FROM ranked_jobs rj
-            LEFT JOIN job_analyses ja ON rj.id = ja.job_id
-            WHERE rj.row_num <= 2
-              AND ja.id IS NULL
-            ORDER BY rj.id ASC
+            SELECT uj.linkedin_job_id, uj.title, uj.company
+            FROM unique_jobs uj
+            LEFT JOIN job_posts jp ON uj.linkedin_job_id = jp.linkedin_job_id
+            WHERE uj.row_num <= 2
+              AND jp.linkedin_job_id IS NULL
+            ORDER BY uj.linkedin_job_id ASC
         """)
 
         rows = cursor.fetchall()
@@ -306,41 +211,31 @@ class SQLiteStorage:
         return [dict(row) for row in rows]
 
     def save_job_analysis(self, match_result):
-        """
-        Save or update job analysis results.
-
-        Args:
-            match_result: MatchResult instance with analysis data
-        """
+        """Save or update job post analysis results."""
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
 
         matched_keywords_str = ','.join(match_result.matched_keywords)
 
         cursor.execute("""
-            INSERT OR REPLACE INTO job_analyses (
-                job_id, linkedin_job_id, job_name, company, job_url, description, applicant_count,
-                employment_type, job_function,
-                total_matches, weighted_score,
-                matched_keywords, match_percentage,
-                analyzed_at, scrape_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO job_posts (
+                linkedin_job_id, description, applicant_count, date_time,
+                total_matches, weighted_score, matched_keywords, match_percentage,
+                employment_type, job_function, seniority_level, industries
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            match_result.job_id,
             match_result.linkedin_job_id,
-            match_result.title,
-            match_result.company,
-            match_result.job_url,
             match_result.description,
             match_result.applicant_count,
-            match_result.employment_type,
-            match_result.job_function,
+            match_result.date_time,
             match_result.total_matches,
             match_result.weighted_score,
             matched_keywords_str,
             match_result.match_percentage,
-            datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-            match_result.scrape_status
+            match_result.employment_type,
+            match_result.job_function,
+            match_result.seniority_level,
+            match_result.industries,
         ))
 
         conn.commit()
@@ -348,38 +243,27 @@ class SQLiteStorage:
 
     def get_analyzed_jobs(self, min_score=0, min_keywords=0,
                           order_by='weighted_score DESC', limit=None):
-        """
-        Get analyzed jobs with optional filtering.
-
-        Args:
-            min_score: Minimum weighted score threshold
-            min_keywords: Minimum number of matched keywords
-            order_by: SQL ORDER BY clause
-            limit: Maximum number of results
-
-        Returns:
-            List of dicts with job and analysis data
-        """
+        """Get analyzed jobs with optional filtering."""
         conn = sqlite3.connect(self.db_file)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        query = f"""
+        query = """
             SELECT
-                j.id, j.linkedin_job_id, j.title, j.company, j.location, j.posted_date, j.job_url,
-                ja.description, ja.applicant_count,
-                ja.employment_type, ja.total_matches,
-                ja.weighted_score, ja.matched_keywords, ja.match_percentage,
-                ja.analyzed_at, ja.scrape_status
-            FROM {self.table_name} j
-            INNER JOIN job_analyses ja ON j.id = ja.job_id
-            WHERE ja.weighted_score >= ?
+                jp.linkedin_job_id, js.title, js.company, js.location,
+                jp.description, jp.applicant_count, jp.date_time,
+                jp.employment_type, jp.job_function, jp.seniority_level,
+                jp.industries, jp.total_matches, jp.weighted_score,
+                jp.matched_keywords, jp.match_percentage
+            FROM job_posts jp
+            INNER JOIN job_searches js ON js.linkedin_job_id = jp.linkedin_job_id
+            WHERE jp.weighted_score >= ?
+            GROUP BY jp.linkedin_job_id
         """
         params = [min_score]
 
         if min_keywords > 0:
-            # Count matched keywords by comma-separated length
-            query += f" AND (LENGTH(ja.matched_keywords) - LENGTH(REPLACE(ja.matched_keywords, ',', '')) + 1) >= ?"
+            query += " HAVING (LENGTH(jp.matched_keywords) - LENGTH(REPLACE(jp.matched_keywords, ',', '')) + 1) >= ?"
             params.append(min_keywords)
 
         query += f" ORDER BY {order_by}"
@@ -389,7 +273,6 @@ class SQLiteStorage:
 
         cursor.execute(query, params)
         rows = cursor.fetchall()
-
         conn.close()
 
         results = []
@@ -412,7 +295,7 @@ class SQLiteStorage:
                 AVG(weighted_score) as avg_score,
                 MAX(weighted_score) as max_score,
                 AVG(match_percentage) as avg_match_pct
-            FROM job_analyses
+            FROM job_posts
         """)
 
         row = cursor.fetchone()
@@ -426,20 +309,7 @@ class SQLiteStorage:
         }
 
     def get_job_summary(self, min_score=0, limit=None, unique=False):
-        """
-        Get job summary from the combined view.
-
-        Returns jobs with: id, job_name, company, description, total_matches,
-        applicant_count, weighted_score, match_percentage, analyzed_at, url
-
-        Args:
-            min_score: Minimum weighted score threshold
-            limit: Maximum number of results
-            unique: If True, use deduplicated view (removes duplicate remote postings)
-
-        Returns:
-            List of dicts with combined job + analysis data
-        """
+        """Get job summary from the combined view."""
         conn = sqlite3.connect(self.db_file)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -458,14 +328,7 @@ class SQLiteStorage:
         return [dict(row) for row in rows]
 
     def export_job_summary_csv(self, filepath=None, min_score=0, unique=True):
-        """
-        Export job summary to CSV file.
-
-        Args:
-            filepath: Path for CSV file (default: data/job_summary.csv)
-            min_score: Minimum weighted score threshold
-            unique: If True, remove duplicate remote job postings (default: True)
-        """
+        """Export job summary to CSV file."""
         import csv
 
         if filepath is None:
@@ -478,11 +341,10 @@ class SQLiteStorage:
             print("No jobs to export")
             return None
 
-        # Define column order
         columns = [
-            'id', 'linkedin_job_id', 'job_name', 'company', 'description', 'total_matches',
-            'applicant_count', 'weighted_score', 'match_percentage',
-            'analyzed_at', 'url'
+            'linkedin_job_id', 'title', 'company', 'location',
+            'date_time', 'applicant_count', 'weighted_score',
+            'match_percentage', 'total_matches', 'matched_keywords'
         ]
 
         with open(filepath, 'w', newline='', encoding='utf-8') as f:

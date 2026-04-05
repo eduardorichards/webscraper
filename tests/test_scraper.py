@@ -15,14 +15,12 @@ class TestJobScraper(unittest.TestCase):
             title="Python Developer",
             company="Tech Corp",
             location="Remote",
-            work_modality="Remote",
-            posted_date="1 day ago",
-            job_url="https://example.com/job"
+            linkedin_job_id="123456789"
         )
-        
+
         self.assertEqual(job.title, "Python Developer")
         self.assertEqual(job.company, "Tech Corp")
-        self.assertEqual(job.work_modality, "Remote")
+        self.assertEqual(job.linkedin_job_id, "123456789")
     
     def test_search_config_creation(self):
         """Test SearchConfig model creation"""

@@ -117,13 +117,29 @@ class DetailScraper:
         return None
 
     def _extract_applicant_count(self, soup):
-        """Extract number of applicants."""
-        elem = soup.select_one('span.num-applicants__caption')
+        """Extract number of applicants.
+
+        LinkedIn displays 3 tiers:
+          - "Be among the first 25 applicants" → 25
+          - "101 applicants" (exact number)    → 101
+          - "Over 200 applicants"              → 201
+
+        Returns:
+            int or None
+        """
+        # Element can be <span> or <figcaption> with same class
+        elem = soup.select_one('.num-applicants__caption')
         if not elem:
             return None
 
-        text = elem.get_text(strip=True)
-        # Extract number from "176 applicants" or "Over 200 applicants"
+        text = elem.get_text(strip=True).lower()
+
+        if 'over' in text or 'más de' in text:
+            return 201
+        if 'first' in text or 'primero' in text:
+            return 25
+
+        # Exact number: "101 applicants"
         match = re.search(r'(\d+)', text.replace(',', ''))
         return int(match.group(1)) if match else None
 

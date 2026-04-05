@@ -1,5 +1,7 @@
 """Orchestrator for keyword matching workflow."""
-from ..models.match_result import MatchResult
+from datetime import datetime, timezone
+
+from ..models.match_result import MatchResult, LINKEDIN_JOB_BASE_URL
 from ..analyzers.keyword_analyzer import KeywordAnalyzer
 from .detail_scraper import DetailScraper
 
@@ -8,36 +10,25 @@ class KeywordMatcher:
     """Orchestrates the keyword matching workflow."""
 
     def __init__(self, sqlite_storage, keyword_config):
-        """
-        Initialize the keyword matcher.
-
-        Args:
-            sqlite_storage: SQLiteStorage instance
-            keyword_config: KeywordConfig instance with keywords to match
-        """
         self.storage = sqlite_storage
         self.keyword_config = keyword_config
         self.detail_scraper = DetailScraper()
         self.analyzer = KeywordAnalyzer(keyword_config)
 
-    def analyze_jobs(self, job_ids=None, skip_analyzed=True):
+    def analyze_jobs(self, skip_analyzed=True):
         """
         Analyze jobs for keyword matches.
 
         Args:
-            job_ids: Specific job IDs to analyze, or None for all unanalyzed
             skip_analyzed: Skip jobs that already have analysis (default True)
 
         Returns:
             list[MatchResult]: Results sorted by weighted_score descending
         """
-        # Get jobs to analyze
-        if job_ids:
-            jobs = self.storage.get_jobs_by_ids(job_ids)
-        elif skip_analyzed:
+        if skip_analyzed:
             jobs = self.storage.get_jobs_without_analysis()
         else:
-            jobs = self.storage.get_all_jobs()
+            jobs = self.storage.get_jobs_without_analysis()
 
         if not jobs:
             print("No jobs to analyze.")
@@ -49,19 +40,13 @@ class KeywordMatcher:
         results = []
 
         for i, job in enumerate(jobs):
-            job_id = job['id']
-            job_url = job['job_url']
+            linkedin_job_id = job['linkedin_job_id']
+            job_url = f"{LINKEDIN_JOB_BASE_URL}{linkedin_job_id}/"
 
             print(f"\n  [{i + 1}/{len(jobs)}] {job.get('title', 'Unknown')[:50]}...")
 
-            # Create result object
-            result = MatchResult(
-                job_id=job_id,
-                job_url=job_url,
-                title=job.get('title'),
-                company=job.get('company'),
-                linkedin_job_id=job.get('linkedin_job_id')
-            )
+            result = MatchResult(linkedin_job_id=linkedin_job_id)
+            result.date_time = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
             # Scrape job details
             details = self.detail_scraper.scrape_job_details(job_url)
@@ -71,7 +56,8 @@ class KeywordMatcher:
                 result.applicant_count = details.get('applicant_count')
                 result.employment_type = details.get('employment_type')
                 result.job_function = details.get('job_function')
-                result.scrape_status = 'success'
+                result.seniority_level = details.get('seniority_level')
+                result.industries = details.get('industries')
 
                 # Analyze for keywords
                 result.keyword_matches = self.analyzer.analyze(result.description)
@@ -79,7 +65,6 @@ class KeywordMatcher:
 
                 print(f"      ✓ Score: {result.weighted_score:.1f} | Match: {result.match_percentage:.0f}% | Applicants: {result.applicant_count or 'N/A'}")
             else:
-                result.scrape_status = 'failed'
                 result.keyword_matches = {kw: 0 for kw in self.keyword_config.keywords}
                 print(f"      ✗ Failed to scrape")
 
@@ -95,17 +80,7 @@ class KeywordMatcher:
         return results
 
     def get_ranked_jobs(self, min_score=0, min_keywords=0, limit=None):
-        """
-        Get previously analyzed jobs, ranked by score.
-
-        Args:
-            min_score: Minimum weighted score threshold
-            min_keywords: Minimum number of matched keywords
-            limit: Maximum number of results
-
-        Returns:
-            list[dict]: Jobs with analysis, sorted by score
-        """
+        """Get previously analyzed jobs, ranked by score."""
         return self.storage.get_analyzed_jobs(
             min_score=min_score,
             min_keywords=min_keywords,
@@ -113,35 +88,29 @@ class KeywordMatcher:
         )
 
     def display_results(self, results, top_n=10):
-        """
-        Display analysis results in a formatted way.
-
-        Args:
-            results: List of MatchResult objects or dicts from get_ranked_jobs
-            top_n: Number of top results to display
-        """
+        """Display analysis results in a formatted way."""
         print(f"\n{'=' * 70}")
         print(f"TOP {min(top_n, len(results))} JOBS BY KEYWORD MATCH SCORE")
         print('=' * 70)
 
         for i, result in enumerate(results[:top_n], 1):
-            # Handle both MatchResult objects and dicts
             if isinstance(result, MatchResult):
                 score = result.weighted_score
                 match_pct = result.match_percentage
                 applicants = result.applicant_count
                 matched_kws = result.matched_keywords
-                title = result.title
-                company = result.company
                 url = result.job_url
+                linkedin_id = result.linkedin_job_id
             else:
                 score = result.get('weighted_score', 0)
                 match_pct = result.get('match_percentage', 0)
                 applicants = result.get('applicant_count')
                 matched_kws = result.get('matched_keywords', [])
-                title = result.get('title', 'Unknown')
-                company = result.get('company', 'Unknown')
-                url = result.get('job_url', '')
+                linkedin_id = result.get('linkedin_job_id', '')
+                url = f"{LINKEDIN_JOB_BASE_URL}{linkedin_id}/"
+
+            title = result.get('title', 'Unknown') if isinstance(result, dict) else linkedin_id
+            company = result.get('company', 'Unknown') if isinstance(result, dict) else ''
 
             print(f"\n{i}. {title}")
             print(f"   Company: {company}")
