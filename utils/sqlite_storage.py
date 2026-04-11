@@ -56,6 +56,15 @@ class SQLiteStorage:
         )
         """)
 
+        # Table 3: Blacklisted companies
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS blacklisted_companies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company TEXT UNIQUE NOT NULL,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """)
+
         # Indexes
         cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_job_searches_linkedin_id
@@ -355,3 +364,36 @@ class SQLiteStorage:
 
         print(f"✅ Exported {len(jobs)} jobs to {filepath}")
         return filepath
+
+    def add_blacklisted_company(self, company):
+        """Add a company to the blacklist (idempotent)."""
+        conn = sqlite3.connect(self.db_file)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO blacklisted_companies (company) VALUES (?)",
+            (company,)
+        )
+        conn.commit()
+        conn.close()
+
+    def remove_blacklisted_company(self, company):
+        """Remove a company from the blacklist."""
+        conn = sqlite3.connect(self.db_file)
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM blacklisted_companies WHERE company = ?",
+            (company,)
+        )
+        conn.commit()
+        conn.close()
+
+    def get_blacklisted_companies(self):
+        """Return a sorted list of blacklisted company names."""
+        conn = sqlite3.connect(self.db_file)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT company FROM blacklisted_companies ORDER BY company ASC"
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [r[0] for r in rows]

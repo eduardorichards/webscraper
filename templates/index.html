@@ -20,6 +20,19 @@
         th.active .arrow { opacity: 1; }
         td { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .filter-row th { padding: 0.3rem 0.4rem; border-bottom: none; }
+        .blacklist-panel { margin-bottom: 1rem; }
+        .blacklist-panel summary { cursor: pointer; font-weight: 600; }
+        .blacklist-tags { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0; }
+        .blacklist-tag { display: inline-flex; align-items: center; gap: 0.3rem;
+                         background: #eee; padding: 0.15rem 0.5rem; border-radius: 1rem;
+                         font-size: 0.8rem; }
+        .blacklist-tag button { background: none; border: none; cursor: pointer;
+                                padding: 0; font-size: 0.9rem; line-height: 1; }
+        .blacklist-add { display: flex; gap: 0.5rem; align-items: center; }
+        .blacklist-add input { margin: 0; }
+        tr.blacklisted { opacity: 0.4; }
+        .block-btn { background: none; border: 1px solid #ccc; padding: 0.1rem 0.4rem;
+                     font-size: 0.75rem; cursor: pointer; border-radius: 0.2rem; }
     </style>
 </head>
 <body>
@@ -32,11 +45,30 @@
         <div><strong>{{ "%.1f"|format(stats.avg_match_pct) }}%</strong><small>Avg Match %</small></div>
     </div>
 
+    <details class="blacklist-panel" id="blacklistPanel">
+        <summary>Blacklisted companies (<span id="blacklistCount">{{ blacklisted|length }}</span>)</summary>
+        <div class="blacklist-tags" id="blacklistTags">
+            {% for c in blacklisted %}
+            <span class="blacklist-tag" data-company="{{ c }}">
+                {{ c }}<button type="button" class="unblock-btn" aria-label="Unblock">✕</button>
+            </span>
+            {% endfor %}
+        </div>
+        <div class="blacklist-add">
+            <input type="text" id="blacklistInput" placeholder="Add company to blacklist…">
+            <button type="button" id="blacklistAddBtn">Add</button>
+        </div>
+    </details>
+
     <form class="controls" method="get" id="filterForm">
         <label>
             Min score:
             <input type="number" name="min_score" value="{{ min_score }}" step="0.5" min="0"
                    onchange="this.form.submit()">
+        </label>
+        <label>
+            <input type="checkbox" id="hideBlacklisted" checked>
+            Hide blacklisted
         </label>
         <small>{{ jobs|length }} jobs shown</small>
         <small id="visibleCount"></small>
@@ -63,6 +95,7 @@
                     <th></th>
                     <th></th>
                     <th></th>
+                    <th></th>
                 </tr>
                 <tr>
                     <th data-sort="string">Job ID <span class="arrow">&#9650;</span></th>
@@ -76,6 +109,7 @@
 
                     <th data-sort="number">Match % <span class="arrow">&#9650;</span></th>
                     <th>Link</th>
+                    <th>Block</th>
                 </tr>
             </thead>
             <tbody>
@@ -95,6 +129,9 @@
                         {% if job.linkedin_job_id %}
                         <a href="https://www.linkedin.com/jobs/view/{{ job.linkedin_job_id }}/" target="_blank" rel="noopener">View</a>
                         {% else %}-{% endif %}
+                    </td>
+                    <td>
+                        <button type="button" class="block-btn" data-company="{{ job.company or '' }}">Block</button>
                     </td>
                 </tr>
                 {% endfor %}
@@ -175,6 +212,13 @@
         var timeValue = document.getElementById("timeValue");
         var timeUnit = document.getElementById("timeUnit");
         var visibleCount = document.getElementById("visibleCount");
+        var hideBlacklistedCb = document.getElementById("hideBlacklisted");
+
+        var blacklisted = new Set({{ blacklisted|tojson }});
+        var blacklistTags = document.getElementById("blacklistTags");
+        var blacklistInput = document.getElementById("blacklistInput");
+        var blacklistAddBtn = document.getElementById("blacklistAddBtn");
+        var blacklistCount = document.getElementById("blacklistCount");
 
         function applyFilters() {
             if (!table) return;
@@ -191,6 +235,7 @@
             rows.forEach(function(row) {
                 var loc = row.children[3].textContent.trim().toLowerCase();
                 var utc = row.children[4].dataset.utc;
+                var company = row.children[2].textContent.trim();
 
                 var locMatch = !locQuery || loc.includes(locQuery);
                 var dateMatch = true;
@@ -201,16 +246,87 @@
                     dateMatch = false;
                 }
 
-                var visible = locMatch && dateMatch;
+                var isBlacklisted = blacklisted.has(company);
+                row.classList.toggle("blacklisted", isBlacklisted);
+                var blacklistOk = !(hideBlacklistedCb.checked && isBlacklisted);
+
+                var visible = locMatch && dateMatch && blacklistOk;
                 row.style.display = visible ? "" : "none";
                 if (visible) shown++;
             });
             visibleCount.textContent = shown + " of " + rows.length + " visible";
         }
 
+        function escapeHtml(s) {
+            return s.replace(/[&<>"']/g, function(c) {
+                return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+            });
+        }
+
+        function renderBlacklistTags() {
+            blacklistTags.innerHTML = "";
+            Array.from(blacklisted).sort().forEach(function(c) {
+                var span = document.createElement("span");
+                span.className = "blacklist-tag";
+                span.dataset.company = c;
+                span.innerHTML = escapeHtml(c) +
+                    '<button type="button" class="unblock-btn" aria-label="Unblock">✕</button>';
+                blacklistTags.appendChild(span);
+            });
+            blacklistCount.textContent = blacklisted.size;
+        }
+
+        function addToBlacklist(company) {
+            company = (company || "").trim();
+            if (!company || blacklisted.has(company)) return;
+            fetch("/api/blacklist", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({company: company})
+            }).then(function(r) {
+                if (!r.ok) return;
+                blacklisted.add(company);
+                renderBlacklistTags();
+                applyFilters();
+            });
+        }
+
+        function removeFromBlacklist(company) {
+            fetch("/api/blacklist", {
+                method: "DELETE",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({company: company})
+            }).then(function(r) {
+                if (!r.ok) return;
+                blacklisted.delete(company);
+                renderBlacklistTags();
+                applyFilters();
+            });
+        }
+
+        blacklistAddBtn.addEventListener("click", function() {
+            addToBlacklist(blacklistInput.value);
+            blacklistInput.value = "";
+        });
+        blacklistInput.addEventListener("keydown", function(e) {
+            if (e.key === "Enter") { e.preventDefault(); blacklistAddBtn.click(); }
+        });
+        blacklistTags.addEventListener("click", function(e) {
+            if (!e.target.classList.contains("unblock-btn")) return;
+            var tag = e.target.closest(".blacklist-tag");
+            if (tag) removeFromBlacklist(tag.dataset.company);
+        });
+        table.addEventListener("click", function(e) {
+            if (!e.target.classList.contains("block-btn")) return;
+            addToBlacklist(e.target.dataset.company);
+        });
+
         locationInput.addEventListener("input", applyFilters);
         timeValue.addEventListener("input", applyFilters);
         timeUnit.addEventListener("change", applyFilters);
+        hideBlacklistedCb.addEventListener("change", applyFilters);
+
+        applyFilters();
     });
     </script>
 </body>
