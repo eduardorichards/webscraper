@@ -324,7 +324,10 @@ class SQLiteStorage:
         cursor = conn.cursor()
 
         view_name = "job_summary_unique" if unique else "job_summary"
-        query = f"SELECT * FROM {view_name} WHERE weighted_score >= ?"
+        query = (
+            f"SELECT * FROM {view_name} WHERE weighted_score >= ? "
+            "ORDER BY date_time IS NULL, date_time DESC"
+        )
         params = [min_score]
 
         if limit:
