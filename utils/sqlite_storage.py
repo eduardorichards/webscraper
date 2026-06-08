@@ -74,6 +74,10 @@ class SQLiteStorage:
         CREATE INDEX IF NOT EXISTS idx_job_posts_score
         ON job_posts(weighted_score DESC)
         """)
+        cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_job_posts_datetime
+        ON job_posts(date_time DESC)
+        """)
 
         # View: combined job data for display
         cursor.execute("DROP VIEW IF EXISTS job_summary")
@@ -317,18 +321,21 @@ class SQLiteStorage:
             'avg_match_pct': row[3] or 0
         }
 
-    def get_job_summary(self, min_score=0, limit=None, unique=False):
+    def get_job_summary(self, min_score=0, limit=None, unique=False, days=7):
         """Get job summary from the combined view."""
         conn = sqlite3.connect(self.db_file)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
         view_name = "job_summary_unique" if unique else "job_summary"
-        query = (
-            f"SELECT * FROM {view_name} WHERE weighted_score >= ? "
-            "ORDER BY date_time IS NULL, date_time DESC"
-        )
+        query = f"SELECT * FROM {view_name} WHERE weighted_score >= ?"
         params = [min_score]
+
+        if days is not None:
+            query += " AND date_time >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
+            params.append(f"-{days} days")
+
+        query += " ORDER BY date_time IS NULL, date_time DESC"
 
         if limit:
             query += f" LIMIT {limit}"

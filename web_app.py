@@ -7,14 +7,17 @@ app = Flask(__name__)
 @app.route("/")
 def index():
     min_score = float(request.args.get("min_score", 0))
+    days_raw = request.args.get("days", "7")
+    days = None if days_raw == "all" else int(days_raw)
 
     storage = SQLiteStorage()
-    jobs = storage.get_job_summary(min_score=min_score, unique=True)
+    jobs = storage.get_job_summary(min_score=min_score, unique=True, days=days)
     stats = storage.get_analysis_stats()
     blacklisted = storage.get_blacklisted_companies()
 
     return render_template("index.html", jobs=jobs, stats=stats,
-                           min_score=min_score, blacklisted=blacklisted)
+                           min_score=min_score, blacklisted=blacklisted,
+                           days=days_raw)
 
 
 @app.route("/api/blacklist", methods=["GET"])
