@@ -27,15 +27,19 @@ DEFAULT_KEYWORDS = [
     "Open Telemetry", "AI", "IA", "LLM", "LLms", "Automated Testing", 
     "Testing", "Automation Testing", "QA", "Architecture", "JUnit", 
     "Mockito", "Agile", "Scrum", "SDLC", "JWT", "OAuth 2.0", "Full Stack", 
-    "Site Reliability Engineer", "SRE", "API", "Restful", "Devops", "Claude", "OpenAI", "Gemini", "Cursor", "Anthropic", "Agentic",
+    "Site Reliability Engineer", "SRE", "API", "Restful", "Devops", "Claude", "OpenAI", "Gemini", "Cursor", "Anthropic", "Agentic", "Semi", "Ssr", "Semisenior",
 ]
 
 # Strategic weights: Prioritizing Java, Testing frameworks, and Backend Architecture
 WEIGHTED_KEYWORDS = {
-    "Java": 5,                # Your primary specialty
-    "Spring Boot": 5,         # Critical for Java Backend roles
-    "JUnit": 4,               # Core for Automated Testing
-    "Mockito": 4,             # Vital for Mock-based testing in Java
+    "Java": 10,                # Your primary specialty
+    "Spring Boot": 10,         # Critical for Java Backend roles
+    "JUnit": 8,               # Core for Automated Testing
+    "Mockito": 8,             # Vital for Mock-based testing in Java
+    "Semi": 10,
+    "Semisenior": 10,
+    "Ssr": 10,
+    "Backend": 8,
     "Automated Testing": 3,   # High signal for your current studies
     "Microservices": 4,       # High-value architecture keyword
     "PostgreSQL": 4,          # Specific DBs weigh more than "SQL"
