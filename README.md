@@ -140,22 +140,32 @@ Job Scraper/
 
 ## Database
 
-Jobs are stored in `data/database/jobs_master.db` with the following schema:
+Jobs are stored in SQLite at `data/database/jobs_master.db` (`DB_PATH`). The schema is created
+and migrated automatically whenever `SQLiteStorage()` is instantiated: new tables and columns
+are added in place, existing data is kept, and running it again does nothing.
 
-| Column | Description |
-|--------|-------------|
-| id | Auto-increment primary key |
-| title | Job title |
-| company | Company name |
-| location | Job location |
-| posted_date | When the job was posted |
-| job_url | LinkedIn job URL (unique) |
-| search_keywords | Keywords used in search |
-| search_location | Location used in search |
-| search_experience | Experience levels searched |
-| search_remote | Whether remote filter was applied |
+All timestamps are UTC ISO-8601 text with seconds and a `Z` suffix, e.g. `2026-10-07T22:11:34Z`.
 
-Duplicates are automatically prevented via the unique `job_url` constraint.
+| Table | One row per | Main columns |
+|-------|-------------|--------------|
+| `search_runs` | search template execution | `template_name`, `keywords`, `location`, `started_at`, `finished_at`, `jobs_found`, `new_jobs`, `status` (`ok` / `error`), `error` |
+| `job_searches` | search result (a job found by a search; the same job can appear many times) | `linkedin_job_id`, `title`, `company`, `location`, `company_url`, `search_*`, `scraped_at`, `search_run_id` |
+| `job_posts` | job (details from the job page + keyword analysis) | `linkedin_job_id` (unique), `description`, `applicant_count`, `applicant_count_qualifier`, `date_time`, `scraped_at`, `weighted_score`, `matched_keywords`, ... |
+| `blacklisted_companies` | company hidden in the web UI | `company`, `added_at` |
+
+- `search_runs.new_jobs` counts jobs whose `linkedin_job_id` was not in `job_searches` before
+  that run. A run with `status` NULL was interrupted before finishing.
+- `scraped_at` is NULL on rows saved before it was introduced; it is not backfilled.
+- `applicant_count_qualifier`: LinkedIn shows bounds instead of exact counts to logged-out
+  visitors. `"Be among the first 25 applicants"` is stored as `25` / `under` (fewer than 25),
+  `"Over 200 applicants"` as `200` / `over`, and an exact `"87 applicants"` as `87` / NULL.
+  Historical rows with `applicant_count = 25` and no qualifier most likely mean "under 25".
+
+Recent search runs:
+```sql
+SELECT template_name, started_at, jobs_found, new_jobs, status, error
+FROM search_runs ORDER BY id DESC LIMIT 24;
+```
 
 ## Querying Results
 

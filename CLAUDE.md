@@ -82,13 +82,17 @@ Job Scraper/
 │   └── analyzers/
 │       └── keyword_analyzer.py  # KeywordAnalyzer - regex matching
 ├── utils/
-│   └── sqlite_storage.py        # SQLiteStorage class
+│   ├── sqlite_storage.py        # SQLiteStorage class (schema + migrations)
+│   └── time_utils.py            # utc_now_iso() timestamp helper
 ├── data/
 │   ├── database/jobs_master.db  # SQLite database
 │   └── logs/                    # scraper.log, cron.log, scraper.lock
 └── tests/
     ├── test_scraper.py          # Unit tests
     ├── test_sqlite_storage.py   # Storage tests
+    ├── test_migrations.py       # Schema migration idempotency
+    ├── test_search_runs.py      # search_runs tracking (HTTP mocked)
+    ├── test_applicant_parsing.py # Applicant caption parsing
     └── test_env.py              # config/env.py tests
 ```
 
@@ -111,7 +115,8 @@ Job Scraper/
 - **`KeywordAnalyzer`**: Regex-based keyword matching with weighted scoring
 
 ### Storage
-- **`SQLiteStorage`**: Primary storage with jobs and job_analyses tables
+- **`SQLiteStorage`**: Primary storage (`search_runs`, `job_searches`, `job_posts`,
+  `blacklisted_companies`); creates and migrates the schema on init
 
 ## Data Flow
 
@@ -119,11 +124,13 @@ Job Scraper/
 ```
 main.py → multiple_search()
   → For each SEARCH_TEMPLATE:
-    → JobScraper.search_jobs(config)
+    → SQLiteStorage.start_search_run()          [search_runs row, status NULL]
+    → JobScraper.search_jobs(config, search_run_id, raise_errors=True)
       → LinkedInURLBuilder.build_url()
       → requests.get(url)
       → LinkedInExtractor.extract_jobs(soup)
-      → SQLiteStorage.append_jobs(jobs)
+      → SQLiteStorage.append_jobs(jobs, ...)    [returns new_jobs]
+    → SQLiteStorage.finish_search_run()         [status 'ok', or 'error' + message]
 ```
 
 ### Keyword Analysis Flow
@@ -132,7 +139,7 @@ main.py → analyze_keywords()
   → KeywordMatcher.analyze_jobs()
     → SQLiteStorage.get_jobs_without_analysis()
     → For each job:
-      → DetailScraper.scrape_job_details(url)  [2-4s delay]
+      → DetailScraper.scrape_job_details(url)  [2-4s delay; parse_applicant_text()]
       → KeywordAnalyzer.analyze(description)
       → SQLiteStorage.save_job_analysis()
     → Sort by weighted_score
@@ -161,9 +168,36 @@ WEIGHTED_KEYWORDS = {...} # keyword weights for scoring
 
 ## Database Schema
 
-Defined in `SQLiteStorage._ensure_db_exists()` (`utils/sqlite_storage.py`). Tables are
-`CREATE TABLE IF NOT EXISTS`; views are dropped and recreated on every `SQLiteStorage()` init.
-The two tables are joined by `linkedin_job_id` (no foreign key).
+Defined in `SQLiteStorage._ensure_db_exists()` (`utils/sqlite_storage.py`), which runs on
+every `SQLiteStorage()` init inside one `BEGIN IMMEDIATE` transaction. Tables are
+`CREATE TABLE IF NOT EXISTS`; views are dropped and recreated each time. `job_searches` and
+`job_posts` are joined by `linkedin_job_id` (no foreign key).
+
+### Migrations
+Schema changes must be idempotent and lossless, added to `_create_schema()`:
+- New columns: `_add_column_if_missing(cursor, table, column, definition)` (checks
+  `PRAGMA table_info`, then `ALTER TABLE ... ADD COLUMN`; returns `True` if it added the column).
+  Existing rows get NULL; don't backfill with made-up values.
+- One-time data fixes: run them only inside `if self._add_column_if_missing(...):` for the column
+  they introduce, so they never re-run on rows written later.
+- Covered by `tests/test_migrations.py` (legacy DB → migrate twice → same data).
+
+### search_runs table
+One row per search template execution in `main.multiple_search()`.
+```sql
+CREATE TABLE search_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_name TEXT,                -- template "name"
+    keywords TEXT,
+    location TEXT,
+    started_at TEXT,                   -- UTC ISO-8601
+    finished_at TEXT,                  -- UTC ISO-8601; NULL = interrupted
+    jobs_found INTEGER,                -- jobs extracted from the search page
+    new_jobs INTEGER,                  -- linkedin_job_ids not in job_searches before this run
+    status TEXT CHECK (status IN ('ok', 'error')),  -- NULL = interrupted
+    error TEXT                         -- exception message when status = 'error'
+)
+```
 
 ### job_searches table
 One row per search hit — the same `linkedin_job_id` can appear many times (once per
@@ -179,9 +213,12 @@ CREATE TABLE job_searches (
     search_keywords TEXT,
     search_location TEXT,
     search_experience TEXT,
-    search_remote TEXT
+    search_remote TEXT,
+    scraped_at TEXT,                   -- UTC, when the search page was fetched (NULL on old rows)
+    search_run_id INTEGER REFERENCES search_runs(id)  -- NULL on old rows
 )
 -- INDEX idx_job_searches_linkedin_id ON job_searches(linkedin_job_id)
+-- INDEX idx_job_searches_run         ON job_searches(search_run_id)
 ```
 
 ### job_posts table
@@ -191,7 +228,7 @@ CREATE TABLE job_posts (
     linkedin_job_id TEXT UNIQUE NOT NULL,
     description TEXT,
     applicant_count INTEGER,
-    date_time TIMESTAMP,
+    date_time TIMESTAMP,               -- when analysis ran (set even if the fetch failed)
     total_matches INTEGER,
     weighted_score REAL,
     matched_keywords TEXT,
@@ -199,11 +236,32 @@ CREATE TABLE job_posts (
     employment_type TEXT,
     job_function TEXT,
     seniority_level TEXT,
-    industries TEXT
+    industries TEXT,
+    scraped_at TEXT,                   -- UTC, when details were fetched; NULL if the fetch failed or old row
+    applicant_count_qualifier TEXT     -- 'under' | 'over' | NULL (exact)
 )
 -- INDEX idx_job_posts_score    ON job_posts(weighted_score DESC)
 -- INDEX idx_job_posts_datetime ON job_posts(date_time DESC)
 ```
+
+### Applicant count
+Logged-out LinkedIn shows bounds, not exact counts, at both ends.
+`parse_applicant_text()` in `detail_scraper.py` returns `(count, qualifier)`:
+
+| Caption (`.num-applicants__caption`) | applicant_count | applicant_count_qualifier |
+|---|---|---|
+| "Be among the first 25 applicants" / "…primeros 25…" | 25 | `under` (fewer than 25) |
+| "Over 200 applicants" / "Más de 200…" | 200 | `over` (more than 200) |
+| "87 applicants" | 87 | NULL (exact) |
+
+Historical data (before the qualifier column existed):
+- The old parser stored "Over 200" as `201`. The migration rewrites those rows once (when it
+  adds the qualifier column) to `200` / `over` — 2,800 rows in a local DB copy on 2026-11-14.
+- The old parser stored "Be among the first N" as `25` with no qualifier, indistinguishable
+  from an exact 25. **Historical `applicant_count = 25` with NULL qualifier most likely means
+  "under 25"** (~82% of `job_posts` rows in a local DB copy on 2026-11-14). The migration leaves
+  them untouched.
+- When sorting/filtering by applicants, treat `25`+NULL like `25`+`under`.
 
 ### blacklisted_companies table
 Companies hidden in the web UI (managed via `/api/blacklist`). Matched by exact
@@ -226,9 +284,10 @@ CREATE TABLE blacklisted_companies (
   the web app uses. Because of the window function, any query on it scans the whole view
   (~0.35 s on ~100k jobs).
 
-### date_time format
-`job_posts.date_time` is stored as UTC ISO-8601 text with a `Z` suffix, e.g.
-`2026-10-07T22:11:34Z` (may be NULL). Compare against it with the same format:
+### Timestamp format
+`job_posts.date_time`, all `scraped_at` columns and the `search_runs` timestamps are stored as
+UTC ISO-8601 text with seconds and a `Z` suffix, e.g. `2026-10-07T22:11:34Z` (may be NULL).
+Generate them with `utils.time_utils.utc_now_iso()`. Compare against them with the same format:
 ```sql
 date_time >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
 ```

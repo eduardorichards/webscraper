@@ -1,5 +1,5 @@
 """Orchestrator for keyword matching workflow."""
-from datetime import datetime, timezone
+from utils.time_utils import utc_now_iso
 
 from ..models.match_result import MatchResult, LINKEDIN_JOB_BASE_URL
 from ..analyzers.keyword_analyzer import KeywordAnalyzer
@@ -46,14 +46,16 @@ class KeywordMatcher:
             print(f"\n  [{i + 1}/{len(jobs)}] {job.get('title', 'Unknown')[:50]}...")
 
             result = MatchResult(linkedin_job_id=linkedin_job_id)
-            result.date_time = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            result.date_time = utc_now_iso()
 
             # Scrape job details
             details = self.detail_scraper.scrape_job_details(job_url)
 
             if details:
+                result.scraped_at = utc_now_iso()
                 result.description = details.get('description')
                 result.applicant_count = details.get('applicant_count')
+                result.applicant_count_qualifier = details.get('applicant_count_qualifier')
                 result.employment_type = details.get('employment_type')
                 result.job_function = details.get('job_function')
                 result.seniority_level = details.get('seniority_level')

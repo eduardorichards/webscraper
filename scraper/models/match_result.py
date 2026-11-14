@@ -14,11 +14,14 @@ class MatchResult:
         # Scraped data
         self.description = None
         self.applicant_count = None
+        # 'under' / 'over' when LinkedIn shows a bound, None for an exact count
+        self.applicant_count_qualifier = None
         self.employment_type = None
         self.job_function = None
         self.seniority_level = None
         self.industries = None
-        self.date_time = None  # Timestamp when the job page was scraped
+        self.date_time = None  # Timestamp when analysis started (set even if the fetch fails)
+        self.scraped_at = None  # Timestamp when details were fetched (None if the fetch failed)
 
         # Match results
         self.keyword_matches = {}  # {keyword: count}
@@ -55,7 +58,9 @@ class MatchResult:
             'linkedin_job_id': self.linkedin_job_id,
             'description': self.description,
             'applicant_count': self.applicant_count,
+            'applicant_count_qualifier': self.applicant_count_qualifier,
             'date_time': self.date_time,
+            'scraped_at': self.scraped_at,
             'total_matches': self.total_matches,
             'weighted_score': self.weighted_score,
             'matched_keywords': self.matched_keywords,

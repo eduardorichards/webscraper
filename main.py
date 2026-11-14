@@ -41,30 +41,56 @@ def setup_logging():
     return logger
 
 
-def multiple_search():
-    """Run multiple predefined searches"""
-    from config.settings import SEARCH_TEMPLATES
+def multiple_search(templates=None, scraper=None):
+    """Run multiple predefined searches, recording one search_runs row each.
+
+    Args:
+        templates: Search template dicts (default: SEARCH_TEMPLATES)
+        scraper: JobScraper to use (default: a new one on the configured DB)
+    """
+    if templates is None:
+        from config.settings import SEARCH_TEMPLATES
+        templates = SEARCH_TEMPLATES
 
     logger = logging.getLogger()
-    scraper = JobScraper()
+    if scraper is None:
+        scraper = JobScraper()
+    storage = scraper.sqlite_storage
     total_jobs_found = 0
 
     logger.info("STARTING BATCH SEARCH")
     print("="*50)
 
-    for i, template in enumerate(SEARCH_TEMPLATES, 1):
-        search_name = template.pop("name", f"Search {i}")
-        logger.info(f"Search {i}/{len(SEARCH_TEMPLATES)}: {search_name}")
+    for i, template in enumerate(templates, 1):
+        params = dict(template)  # Don't mutate the shared template
+        search_name = params.pop("name", f"Search {i}")
+        logger.info(f"Search {i}/{len(templates)}: {search_name}")
         print("-" * 40)
 
-        search_config = SearchConfig(**template)
-        jobs = scraper.search_jobs(search_config, save_results=True)
-        total_jobs_found += len(jobs)
-
-        logger.info(f"Found {len(jobs)} jobs in search '{search_name}'")
+        run_id = storage.start_search_run(
+            search_name, params.get("keywords"), params.get("location"))
+        jobs = []
+        try:
+            search_config = SearchConfig(**params)
+            jobs = scraper.search_jobs(
+                search_config, save_results=True,
+                search_run_id=run_id, raise_errors=True)
+        except Exception as e:
+            logger.error(f"Search '{search_name}' failed: {e}")
+            storage.finish_search_run(
+                run_id, jobs_found=len(jobs), new_jobs=0,
+                status='error', error=str(e) or type(e).__name__)
+        else:
+            total_jobs_found += len(jobs)
+            storage.finish_search_run(
+                run_id, jobs_found=len(jobs), new_jobs=scraper.last_new_jobs,
+                status='ok')
+            logger.info(
+                f"Found {len(jobs)} jobs ({scraper.last_new_jobs} new) "
+                f"in search '{search_name}'")
 
         # Random delay between searches to avoid rate limiting
-        if i < len(SEARCH_TEMPLATES):
+        if i < len(templates):
             delay = random.uniform(SEARCH_MIN_DELAY, SEARCH_MAX_DELAY)
             logger.info(f"Waiting {delay:.1f}s before next search...")
             time.sleep(delay)

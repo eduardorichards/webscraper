@@ -16,6 +16,36 @@ from config.env import (
 )
 
 
+# Logged-out LinkedIn shows bounds instead of exact counts for very low and
+# very high numbers. Spanish variants cover pages served in es-* locales.
+_UNDER_MARKERS = ('first', 'primer')
+_OVER_MARKERS = ('over', 'más de', 'mas de')
+
+
+def parse_applicant_text(text):
+    """Parse LinkedIn's applicant caption into (count, qualifier).
+
+      "Be among the first 25 applicants" → (25, 'under')   fewer than 25
+      "Over 200 applicants"              → (200, 'over')   more than 200
+      "101 applicants" / "1,234 ..."     → (101, None)     exact
+
+    Returns (None, None) if the text has no number.
+    """
+    if not text:
+        return None, None
+    text = text.lower()
+    match = re.search(r'\d[\d,.]*', text)
+    if not match:
+        return None, None
+    count = int(re.sub(r'[,.]', '', match.group(0)))
+
+    if any(marker in text for marker in _UNDER_MARKERS):
+        return count, 'under'
+    if any(marker in text for marker in _OVER_MARKERS):
+        return count, 'over'
+    return count, None
+
+
 class DetailScraper:
     """Scrapes job detail pages using requests with anti-detection measures."""
 
@@ -82,9 +112,11 @@ class DetailScraper:
             soup = BeautifulSoup(response.content, 'html.parser')
 
             # Extract all data
+            applicant_count, applicant_count_qualifier = self._extract_applicant_count(soup)
             result = {
                 'description': self._extract_description(soup),
-                'applicant_count': self._extract_applicant_count(soup),
+                'applicant_count': applicant_count,
+                'applicant_count_qualifier': applicant_count_qualifier,
                 **self._extract_job_criteria(soup)
             }
 
@@ -117,31 +149,17 @@ class DetailScraper:
         return None
 
     def _extract_applicant_count(self, soup):
-        """Extract number of applicants.
-
-        LinkedIn displays 3 tiers:
-          - "Be among the first 25 applicants" → 25
-          - "101 applicants" (exact number)    → 101
-          - "Over 200 applicants"              → 201
+        """Extract the applicant count and its qualifier.
 
         Returns:
-            int or None
+            tuple (count, qualifier) as described in parse_applicant_text();
+            (None, None) if the element is missing.
         """
         # Element can be <span> or <figcaption> with same class
         elem = soup.select_one('.num-applicants__caption')
         if not elem:
-            return None
-
-        text = elem.get_text(strip=True).lower()
-
-        if 'over' in text or 'más de' in text:
-            return 201
-        if 'first' in text or 'primero' in text:
-            return 25
-
-        # Exact number: "101 applicants"
-        match = re.search(r'(\d+)', text.replace(',', ''))
-        return int(match.group(1)) if match else None
+            return None, None
+        return parse_applicant_text(elem.get_text(strip=True))
 
     def _extract_job_criteria(self, soup):
         """Extract seniority level, employment type, etc."""

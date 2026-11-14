@@ -4,6 +4,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from config.env import DB_PATH
+from utils.time_utils import utc_now_iso
 
 LINKEDIN_JOB_BASE_URL = "https://www.linkedin.com/jobs/view/"
 
@@ -18,10 +19,35 @@ class SQLiteStorage:
         self._ensure_db_exists()
 
     def _ensure_db_exists(self):
-        """Create SQLite database and tables if they don't exist."""
-        conn = sqlite3.connect(self.db_file)
-        cursor = conn.cursor()
+        """Create tables if missing and apply idempotent schema migrations.
 
+        Everything runs in one IMMEDIATE transaction: concurrent inits (cron
+        scraper + web app) are serialized, and a failure leaves the DB untouched.
+        """
+        conn = sqlite3.connect(self.db_file, isolation_level=None)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("BEGIN IMMEDIATE")
+            self._create_schema(cursor)
+            cursor.execute("COMMIT")
+        except Exception:
+            cursor.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
+        print(f"✅ SQLite database ready at: {self.db_file}")
+
+    @staticmethod
+    def _add_column_if_missing(cursor, table, column, definition):
+        """Add a column unless it exists. Returns True if it was added."""
+        cursor.execute(f"PRAGMA table_info({table})")
+        if column in {row[1] for row in cursor.fetchall()}:
+            return False
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+        return True
+
+    def _create_schema(self, cursor):
+        """Create tables, indexes and views; migrate older databases in place."""
         # Table 1: Search results (linkedin_job_id is NOT unique)
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS job_searches (
@@ -65,7 +91,45 @@ class SQLiteStorage:
         )
         """)
 
+        # Table 4: One row per search template execution
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS search_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            template_name TEXT,
+            keywords TEXT,
+            location TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            jobs_found INTEGER,
+            new_jobs INTEGER,
+            status TEXT CHECK (status IN ('ok', 'error')),
+            error TEXT
+        )
+        """)
+
+        # Migrations: columns added after the first release. Existing rows
+        # keep NULL (ADD COLUMN does not rewrite the table).
+        self._add_column_if_missing(cursor, 'job_searches', 'scraped_at', 'TEXT')
+        self._add_column_if_missing(
+            cursor, 'job_searches', 'search_run_id',
+            'INTEGER REFERENCES search_runs(id)')
+        self._add_column_if_missing(cursor, 'job_posts', 'scraped_at', 'TEXT')
+        if self._add_column_if_missing(
+                cursor, 'job_posts', 'applicant_count_qualifier', 'TEXT'):
+            # One-time data fix, run only when the column is first added: the
+            # old parser stored "Over 200 applicants" as 201. Running it on
+            # every init would also rewrite genuine exact counts of 201.
+            cursor.execute("""
+            UPDATE job_posts
+            SET applicant_count = 200, applicant_count_qualifier = 'over'
+            WHERE applicant_count = 201 AND applicant_count_qualifier IS NULL
+            """)
+
         # Indexes
+        cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_job_searches_run
+        ON job_searches(search_run_id)
+        """)
         cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_job_searches_linkedin_id
         ON job_searches(linkedin_job_id)
@@ -121,43 +185,106 @@ class SQLiteStorage:
         ORDER BY weighted_score DESC
         """)
 
-        conn.commit()
-        conn.close()
-        print(f"✅ SQLite database ready at: {self.db_file}")
+    def start_search_run(self, template_name, keywords, location):
+        """Insert a search_runs row for a template execution; return its id.
 
-    def append_jobs(self, jobs, search_config):
-        """Insert search results into job_searches table."""
-        if not jobs:
-            print("No jobs to append to SQLite database")
-            return
-
+        status/finished_at stay NULL until finish_search_run() is called, so
+        a row left that way means the run was interrupted.
+        """
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO search_runs (template_name, keywords, location, started_at)
+            VALUES (?, ?, ?, ?)
+        """, (template_name, keywords, location, utc_now_iso()))
+        run_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return run_id
 
-        added = 0
-        for job in jobs:
-            cursor.execute("""
-            INSERT INTO job_searches (
-                linkedin_job_id, title, company, location, company_url,
-                search_keywords, search_location, search_experience, search_remote
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                job.linkedin_job_id,
-                job.title,
-                job.company,
-                job.location,
-                job.company_url,
-                search_config.keywords,
-                search_config.location,
-                ','.join(map(str, search_config.experience_levels)) if search_config.experience_levels else '',
-                'Yes' if search_config.remote else 'No'
-            ))
-            added += 1
-
+    def finish_search_run(self, run_id, jobs_found, new_jobs, status, error=None):
+        """Record the outcome of a search run ('ok' or 'error')."""
+        conn = sqlite3.connect(self.db_file)
+        conn.execute("""
+            UPDATE search_runs
+            SET finished_at = ?, jobs_found = ?, new_jobs = ?, status = ?, error = ?
+            WHERE id = ?
+        """, (utc_now_iso(), jobs_found, new_jobs, status, error, run_id))
         conn.commit()
         conn.close()
 
-        print(f"✅ Added {added} search results to SQLite database")
+    def get_search_runs(self, limit=50):
+        """Return the most recent search runs, newest first."""
+        conn = sqlite3.connect(self.db_file)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM search_runs ORDER BY id DESC LIMIT ?", (int(limit),)
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def append_jobs(self, jobs, search_config, search_run_id=None, scraped_at=None):
+        """Insert search results into job_searches table.
+
+        Returns:
+            int: number of new jobs, i.e. distinct linkedin_job_ids in `jobs`
+            not already present in job_searches before this call.
+        """
+        if not jobs:
+            print("No jobs to append to SQLite database")
+            return 0
+
+        if scraped_at is None:
+            scraped_at = utc_now_iso()
+
+        conn = sqlite3.connect(self.db_file, isolation_level=None)
+        cursor = conn.cursor()
+
+        # Count new IDs in the same transaction as the insert
+        cursor.execute("BEGIN IMMEDIATE")
+        try:
+            new_ids = set()
+            for job_id in {job.linkedin_job_id for job in jobs if job.linkedin_job_id}:
+                cursor.execute(
+                    "SELECT 1 FROM job_searches WHERE linkedin_job_id = ? LIMIT 1",
+                    (job_id,)
+                )
+                if cursor.fetchone() is None:
+                    new_ids.add(job_id)
+
+            added = 0
+            for job in jobs:
+                cursor.execute("""
+                INSERT INTO job_searches (
+                    linkedin_job_id, title, company, location, company_url,
+                    search_keywords, search_location, search_experience, search_remote,
+                    scraped_at, search_run_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    job.linkedin_job_id,
+                    job.title,
+                    job.company,
+                    job.location,
+                    job.company_url,
+                    search_config.keywords,
+                    search_config.location,
+                    ','.join(map(str, search_config.experience_levels)) if search_config.experience_levels else '',
+                    'Yes' if search_config.remote else 'No',
+                    scraped_at,
+                    search_run_id,
+                ))
+                added += 1
+
+            cursor.execute("COMMIT")
+        except Exception:
+            cursor.execute("ROLLBACK")
+            raise
+        finally:
+            conn.close()
+
+        print(f"✅ Added {added} search results to SQLite database "
+              f"({len(new_ids)} new jobs)")
+        return len(new_ids)
 
     def get_total_jobs(self):
         """Get total number of unique linkedin_job_ids in searches."""
@@ -234,8 +361,9 @@ class SQLiteStorage:
             INSERT OR REPLACE INTO job_posts (
                 linkedin_job_id, description, applicant_count, date_time,
                 total_matches, weighted_score, matched_keywords, match_percentage,
-                employment_type, job_function, seniority_level, industries
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                employment_type, job_function, seniority_level, industries,
+                applicant_count_qualifier, scraped_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             match_result.linkedin_job_id,
             match_result.description,
@@ -249,6 +377,8 @@ class SQLiteStorage:
             match_result.job_function,
             match_result.seniority_level,
             match_result.industries,
+            match_result.applicant_count_qualifier,
+            match_result.scraped_at,
         ))
 
         conn.commit()
