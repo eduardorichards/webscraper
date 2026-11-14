@@ -10,6 +10,13 @@ python main.py
 ```
 `main.py` calls `setup_logging()`, then runs `multiple_search()` followed by `analyze_keywords()` in sequence. Logs go to both stdout and `data/logs/scraper.log`.
 
+## Development Notes
+
+- The DB can be large (~100k jobs, ~490 MB in production). Any feature that lists jobs must be paginated/limited; never render the full table.
+- Web app port is configurable via the PORT env var (default 5000).
+- Do not run the scraper (`main.py`) unless explicitly asked — it hits LinkedIn and can get the IP blocked.
+- Never deploy or SSH into the server; deployment is done manually.
+
 ## Project Structure
 ```
 Job Scraper/
