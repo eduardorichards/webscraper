@@ -11,15 +11,19 @@
         .stats { display: flex; gap: 2rem; margin-bottom: 1rem; }
         .stats div { text-align: center; }
         .stats strong { display: block; font-size: 1.4rem; }
-        .controls { display: flex; gap: 2rem; align-items: center; margin-bottom: 1rem; }
-        .controls label, .controls input { margin-bottom: 0; }
+        .controls { display: flex; flex-wrap: wrap; gap: 1rem 2rem; align-items: center; margin-bottom: 1rem; }
+        .controls label, .controls input, .controls select { margin-bottom: 0; }
         .controls input[type=number] { width: 6rem; }
+        .controls input[type=text] { width: 12rem; }
+        .controls select { width: auto; }
         table { font-size: 0.85rem; }
-        th { cursor: pointer; user-select: none; white-space: nowrap; }
-        th .arrow { margin-left: 0.3rem; opacity: 0.4; }
+        th { user-select: none; white-space: nowrap; }
+        th a { text-decoration: none; color: inherit; }
+        th .arrow { margin-left: 0.3rem; opacity: 0.25; }
         th.active .arrow { opacity: 1; }
         td { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .filter-row th { padding: 0.3rem 0.4rem; border-bottom: none; }
+        .pager { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin: 0.5rem 0; font-size: 0.85rem; }
+        .pager .disabled { opacity: 0.4; }
         .blacklist-panel { margin-bottom: 1rem; }
         .blacklist-panel summary { cursor: pointer; font-weight: 600; }
         .blacklist-tags { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0; }
@@ -36,6 +40,39 @@
     </style>
 </head>
 <body>
+    {% macro sort_th(key, label, first_dir='asc') %}
+        {% set active = sort == key %}
+        {% if active %}
+            {% set next_dir = 'asc' if direction == 'desc' else 'desc' %}
+        {% else %}
+            {% set next_dir = first_dir %}
+        {% endif %}
+        <th class="{{ 'active' if active }}">
+            <a href="{{ index_url(query_args, sort=key, dir=next_dir, page=1) }}">{{ label }}<span class="arrow">{% if active and direction == 'desc' %}&#9660;{% else %}&#9650;{% endif %}</span></a>
+        </th>
+    {% endmacro %}
+
+    {% macro pager() %}
+    <nav class="pager">
+        {% if page > 1 %}
+            <a href="{{ index_url(query_args, page=1) }}">&laquo; Primera</a>
+            <a href="{{ index_url(query_args, page=page - 1) }}">&lsaquo; Anterior</a>
+        {% else %}
+            <span class="disabled">&laquo; Primera</span>
+            <span class="disabled">&lsaquo; Anterior</span>
+        {% endif %}
+        <span>Página {{ page }} de {{ total_pages }}</span>
+        {% if page < total_pages %}
+            <a href="{{ index_url(query_args, page=page + 1) }}">Siguiente &rsaquo;</a>
+            <a href="{{ index_url(query_args, page=total_pages) }}">Última &raquo;</a>
+        {% else %}
+            <span class="disabled">Siguiente &rsaquo;</span>
+            <span class="disabled">Última &raquo;</span>
+        {% endif %}
+        <small>Mostrando {{ start }}–{{ end }} de {{ total }}</small>
+    </nav>
+    {% endmacro %}
+
     <h1>Job Scraper Results</h1>
 
     <div class="stats">
@@ -61,6 +98,10 @@
     </details>
 
     <form class="controls" method="get" id="filterForm">
+        {# Any filter change resubmits the form, which always goes back to page 1 #}
+        <input type="hidden" name="page" value="1">
+        <input type="hidden" name="sort" value="{{ sort }}">
+        <input type="hidden" name="dir" value="{{ direction }}">
         <label>
             Min score:
             <input type="number" name="min_score" value="{{ min_score }}" step="0.5" min="0"
@@ -68,7 +109,7 @@
         </label>
         <label>
             Period:
-            <select name="days" onchange="this.form.submit()" style="width:auto; margin:0;">
+            <select name="days" onchange="this.form.submit()">
                 <option value="7"   {% if days == '7'   %}selected{% endif %}>Last 7 days</option>
                 <option value="14"  {% if days == '14'  %}selected{% endif %}>Last 14 days</option>
                 <option value="30"  {% if days == '30'  %}selected{% endif %}>Last 30 days</option>
@@ -76,54 +117,54 @@
             </select>
         </label>
         <label>
-            <input type="checkbox" id="hideBlacklisted" checked>
+            Last
+            <input type="number" name="hours" value="{{ hours if hours is not none else '' }}" min="1"
+                   placeholder="#" style="width:4.5rem; display:inline-block;" onchange="this.form.submit()">
+            hours
+        </label>
+        <label>
+            Location:
+            <input type="text" name="location" value="{{ location }}" placeholder="Filter..."
+                   onchange="this.form.submit()">
+        </label>
+        <label>
+            <input type="hidden" name="hide_blacklisted" value="0">
+            <input type="checkbox" name="hide_blacklisted" value="1" {% if hide_blacklisted %}checked{% endif %}
+                   onchange="this.form.submit()">
             Hide blacklisted
         </label>
-        <small>{{ jobs|length }} jobs shown</small>
-        <small id="visibleCount"></small>
+        <label>
+            Per page:
+            <select name="per_page" onchange="this.form.submit()">
+                {% for n in per_page_options %}
+                <option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }}</option>
+                {% endfor %}
+            </select>
+        </label>
     </form>
 
     {% if jobs %}
+    {{ pager() }}
     <figure>
         <table role="grid" id="jobTable">
             <thead>
-                <tr class="filter-row">
-                    <th></th>
-                    <th></th>
-                    <th></th>
-                    <th><input type="text" id="locationFilter" placeholder="Filter..." style="margin:0; padding:0.2rem 0.4rem; font-size:0.8rem;"></th>
-                    <th style="white-space: nowrap;">
-                        <input type="number" id="timeValue" min="1" placeholder="#" style="margin:0; padding:0.2rem 0.4rem; font-size:0.8rem; width:3.5rem; display:inline-block;">
-                        <select id="timeUnit" style="margin:0; padding:0.2rem 0.3rem; font-size:0.8rem; width:auto; display:inline-block;">
-                            <option value="hours">hrs</option>
-                            <option value="days">days</option>
-                        </select>
-                    </th>
-                    <th></th>
-                    <th></th>
-                    <th></th>
-                    <th></th>
-                    <th></th>
-                    <th></th>
-                </tr>
                 <tr>
-                    <th data-sort="string">Job ID <span class="arrow">&#9650;</span></th>
-                    <th data-sort="string">Title <span class="arrow">&#9650;</span></th>
-                    <th data-sort="string">Company <span class="arrow">&#9650;</span></th>
-                    <th data-sort="string">Location <span class="arrow">&#9650;</span></th>
-                    <th data-sort="date">Date <span class="arrow">&#9650;</span></th>
-                    <th data-sort="number">Applicants <span class="arrow">&#9650;</span></th>
-                    <th data-sort="number">Matches <span class="arrow">&#9650;</span></th>
-                    <th data-sort="number">Score <span class="arrow">&#9650;</span></th>
-
-                    <th data-sort="number">Match % <span class="arrow">&#9650;</span></th>
+                    {{ sort_th('linkedin_job_id', 'Job ID') }}
+                    {{ sort_th('title', 'Title') }}
+                    {{ sort_th('company', 'Company') }}
+                    {{ sort_th('location', 'Location') }}
+                    {{ sort_th('date_time', 'Date', 'desc') }}
+                    {{ sort_th('applicant_count', 'Applicants') }}
+                    {{ sort_th('total_matches', 'Matches', 'desc') }}
+                    {{ sort_th('weighted_score', 'Score', 'desc') }}
+                    {{ sort_th('match_percentage', 'Match %', 'desc') }}
                     <th>Link</th>
                     <th>Block</th>
                 </tr>
             </thead>
             <tbody>
                 {% for job in jobs %}
-                <tr>
+                <tr class="{{ 'blacklisted' if job.company in blacklisted }}">
                     <td>{{ job.linkedin_job_id or "-" }}</td>
                     <td title="{{ job.title or '' }}">{{ job.title or "-" }}</td>
                     <td title="{{ job.company or '' }}">{{ job.company or "-" }}</td>
@@ -132,7 +173,6 @@
                     <td>{{ job.applicant_count if job.applicant_count is not none else "-" }}</td>
                     <td>{{ job.total_matches if job.total_matches is not none else "-" }}</td>
                     <td>{{ "%.1f"|format(job.weighted_score) if job.weighted_score is not none else "-" }}</td>
-
                     <td>{{ "%.1f"|format(job.match_percentage) ~ "%" if job.match_percentage is not none else "-" }}</td>
                     <td>
                         {% if job.linkedin_job_id %}
@@ -147,6 +187,9 @@
             </tbody>
         </table>
     </figure>
+    {{ pager() }}
+    {% elif total == 0 and stats.total_analyzed %}
+    <p>No jobs match the current filters.</p>
     {% else %}
     <p>No jobs found. Run the scraper first with <code>python main.py</code>, then analyze with <code>analyze_keywords()</code>.</p>
     {% endif %}
@@ -165,152 +208,32 @@
                 hour: "2-digit", minute: "2-digit"
             });
         });
-        const table = document.getElementById("jobTable");
-        if (!table) return;
-        const headers = table.querySelectorAll("th[data-sort]");
-        let currentCol = -1;
-        let ascending = true;
 
-        headers.forEach(function(th, index) {
-            th.addEventListener("click", function() {
-                if (currentCol === index) {
-                    ascending = !ascending;
-                } else {
-                    if (currentCol >= 0) headers[currentCol].classList.remove("active");
-                    currentCol = index;
-                    ascending = true;
-                }
-                th.classList.add("active");
-                th.querySelector(".arrow").innerHTML = ascending ? "&#9650;" : "&#9660;";
-
-                const tbody = table.querySelector("tbody");
-                const rows = Array.from(tbody.querySelectorAll("tr"));
-                const type = th.dataset.sort;
-
-                rows.sort(function(a, b) {
-                    let aVal = a.children[index].textContent.trim();
-                    let bVal = b.children[index].textContent.trim();
-
-                    if (type === "date") {
-                        let aTime = a.children[index].dataset.utc;
-                        let bTime = b.children[index].dataset.utc;
-                        let aNum = aTime ? new Date(aTime).getTime() : (ascending ? Infinity : -Infinity);
-                        let bNum = bTime ? new Date(bTime).getTime() : (ascending ? Infinity : -Infinity);
-                        return ascending ? aNum - bNum : bNum - aNum;
-                    } else if (type === "number") {
-                        let aNum = parseFloat(aVal.replace("%", ""));
-                        let bNum = parseFloat(bVal.replace("%", ""));
-                        if (isNaN(aNum)) aNum = ascending ? Infinity : -Infinity;
-                        if (isNaN(bNum)) bNum = ascending ? Infinity : -Infinity;
-                        return ascending ? aNum - bNum : bNum - aNum;
-                    } else {
-                        if (aVal === "-") aVal = ascending ? "\uffff" : "";
-                        if (bVal === "-") bVal = ascending ? "\uffff" : "";
-                        return ascending
-                            ? aVal.localeCompare(bVal, undefined, {sensitivity: "base"})
-                            : bVal.localeCompare(aVal, undefined, {sensitivity: "base"});
-                    }
-                });
-
-                rows.forEach(function(row) { tbody.appendChild(row); });
-            });
-        });
-
-        // Client-side filtering
-        var locationInput = document.getElementById("locationFilter");
-        var timeValue = document.getElementById("timeValue");
-        var timeUnit = document.getElementById("timeUnit");
-        var visibleCount = document.getElementById("visibleCount");
-        var hideBlacklistedCb = document.getElementById("hideBlacklisted");
-
+        var table = document.getElementById("jobTable");
         var blacklisted = new Set({{ blacklisted|tojson }});
         var blacklistTags = document.getElementById("blacklistTags");
         var blacklistInput = document.getElementById("blacklistInput");
         var blacklistAddBtn = document.getElementById("blacklistAddBtn");
-        var blacklistCount = document.getElementById("blacklistCount");
 
-        function applyFilters() {
-            if (!table) return;
-            var locQuery = locationInput.value.trim().toLowerCase();
-            var hours = parseFloat(timeValue.value);
-            var cutoff = null;
-            if (!isNaN(hours) && hours > 0) {
-                var ms = timeUnit.value === "days" ? hours * 86400000 : hours * 3600000;
-                cutoff = Date.now() - ms;
-            }
-
-            var rows = table.querySelectorAll("tbody tr");
-            var shown = 0;
-            rows.forEach(function(row) {
-                var loc = row.children[3].textContent.trim().toLowerCase();
-                var utc = row.children[4].dataset.utc;
-                var company = row.children[2].textContent.trim();
-
-                var locMatch = !locQuery || loc.includes(locQuery);
-                var dateMatch = true;
-                if (cutoff && utc) {
-                    var ts = new Date(utc.endsWith("Z") || utc.includes("+") ? utc : utc + "Z").getTime();
-                    dateMatch = !isNaN(ts) && ts >= cutoff;
-                } else if (cutoff && !utc) {
-                    dateMatch = false;
-                }
-
-                var isBlacklisted = blacklisted.has(company);
-                row.classList.toggle("blacklisted", isBlacklisted);
-                var blacklistOk = !(hideBlacklistedCb.checked && isBlacklisted);
-
-                var visible = locMatch && dateMatch && blacklistOk;
-                row.style.display = visible ? "" : "none";
-                if (visible) shown++;
+        // Blacklist changes affect the server-side filter, so reload after each one
+        function blacklistRequest(method, company) {
+            fetch("/api/blacklist", {
+                method: method,
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({company: company})
+            }).then(function(r) {
+                if (r.ok) window.location.reload();
             });
-            visibleCount.textContent = shown + " of " + rows.length + " visible";
-        }
-
-        function escapeHtml(s) {
-            return s.replace(/[&<>"']/g, function(c) {
-                return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
-            });
-        }
-
-        function renderBlacklistTags() {
-            blacklistTags.innerHTML = "";
-            Array.from(blacklisted).sort().forEach(function(c) {
-                var span = document.createElement("span");
-                span.className = "blacklist-tag";
-                span.dataset.company = c;
-                span.innerHTML = escapeHtml(c) +
-                    '<button type="button" class="unblock-btn" aria-label="Unblock">✕</button>';
-                blacklistTags.appendChild(span);
-            });
-            blacklistCount.textContent = blacklisted.size;
         }
 
         function addToBlacklist(company) {
             company = (company || "").trim();
             if (!company || blacklisted.has(company)) return;
-            fetch("/api/blacklist", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({company: company})
-            }).then(function(r) {
-                if (!r.ok) return;
-                blacklisted.add(company);
-                renderBlacklistTags();
-                applyFilters();
-            });
+            blacklistRequest("POST", company);
         }
 
         function removeFromBlacklist(company) {
-            fetch("/api/blacklist", {
-                method: "DELETE",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({company: company})
-            }).then(function(r) {
-                if (!r.ok) return;
-                blacklisted.delete(company);
-                renderBlacklistTags();
-                applyFilters();
-            });
+            blacklistRequest("DELETE", company);
         }
 
         blacklistAddBtn.addEventListener("click", function() {
@@ -325,17 +248,12 @@
             var tag = e.target.closest(".blacklist-tag");
             if (tag) removeFromBlacklist(tag.dataset.company);
         });
-        table.addEventListener("click", function(e) {
-            if (!e.target.classList.contains("block-btn")) return;
-            addToBlacklist(e.target.dataset.company);
-        });
-
-        locationInput.addEventListener("input", applyFilters);
-        timeValue.addEventListener("input", applyFilters);
-        timeUnit.addEventListener("change", applyFilters);
-        hideBlacklistedCb.addEventListener("change", applyFilters);
-
-        applyFilters();
+        if (table) {
+            table.addEventListener("click", function(e) {
+                if (!e.target.classList.contains("block-btn")) return;
+                addToBlacklist(e.target.dataset.company);
+            });
+        }
     });
     </script>
 </body>

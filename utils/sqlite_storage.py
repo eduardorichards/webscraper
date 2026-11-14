@@ -321,30 +321,103 @@ class SQLiteStorage:
             'avg_match_pct': row[3] or 0
         }
 
-    def get_job_summary(self, min_score=0, limit=None, unique=False, days=7):
-        """Get job summary from the combined view."""
+    # Whitelist of sortable columns: user input only ever selects a key here
+    SORT_COLUMNS = {
+        'linkedin_job_id': 'linkedin_job_id',
+        'title': 'title',
+        'company': 'company',
+        'location': 'location',
+        'date_time': 'date_time',
+        'applicant_count': 'applicant_count',
+        'total_matches': 'total_matches',
+        'weighted_score': 'weighted_score',
+        'match_percentage': 'match_percentage',
+    }
+    SORT_DIRECTIONS = {'asc': 'ASC', 'desc': 'DESC'}
+    DEFAULT_SORT = 'date_time'
+    DEFAULT_DIRECTION = 'desc'
+
+    def _build_summary_filters(self, min_score=0, days=None, location=None,
+                               hours=None, hide_blacklisted=False):
+        """Build the WHERE clause and bound params shared by summary queries."""
+        clauses = ["weighted_score >= ?"]
+        params = [min_score]
+
+        if days is not None:
+            clauses.append("date_time >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)")
+            params.append(f"-{int(days)} days")
+
+        if hours is not None:
+            clauses.append("date_time >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)")
+            params.append(f"-{int(hours)} hours")
+
+        if location:
+            clauses.append("LOWER(location) LIKE LOWER(?)")
+            params.append(f"%{location}%")
+
+        if hide_blacklisted:
+            clauses.append(
+                "(company IS NULL OR company NOT IN "
+                "(SELECT company FROM blacklisted_companies))"
+            )
+
+        return " WHERE " + " AND ".join(clauses), params
+
+    def get_job_summary(self, min_score=0, limit=None, unique=False, days=7,
+                        page=1, per_page=50, location=None, hours=None,
+                        hide_blacklisted=False, sort=DEFAULT_SORT,
+                        direction=DEFAULT_DIRECTION):
+        """Get one page of the job summary view.
+
+        per_page=None disables pagination (all matching rows, or `limit`).
+        Invalid sort/direction values fall back to date_time DESC.
+        """
         conn = sqlite3.connect(self.db_file)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
         view_name = "job_summary_unique" if unique else "job_summary"
-        query = f"SELECT * FROM {view_name} WHERE weighted_score >= ?"
-        params = [min_score]
+        where, params = self._build_summary_filters(
+            min_score, days, location, hours, hide_blacklisted)
 
-        if days is not None:
-            query += " AND date_time >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)"
-            params.append(f"-{days} days")
+        if sort not in self.SORT_COLUMNS or direction not in self.SORT_DIRECTIONS:
+            sort, direction = self.DEFAULT_SORT, self.DEFAULT_DIRECTION
+        col = self.SORT_COLUMNS[sort]
+        dir_sql = self.SORT_DIRECTIONS[direction]
 
-        query += " ORDER BY date_time IS NULL, date_time DESC"
+        # NULLs always last; linkedin_job_id as tiebreaker keeps pages stable
+        query = (f"SELECT * FROM {view_name}{where}"
+                 f" ORDER BY {col} IS NULL, {col} {dir_sql},"
+                 f" linkedin_job_id {dir_sql}")
 
-        if limit:
-            query += f" LIMIT {limit}"
+        if per_page is not None:
+            page = max(1, int(page))
+            query += " LIMIT ? OFFSET ?"
+            params.extend([int(per_page), (page - 1) * int(per_page)])
+        elif limit:
+            query += " LIMIT ?"
+            params.append(int(limit))
 
         cursor.execute(query, params)
         rows = cursor.fetchall()
         conn.close()
 
         return [dict(row) for row in rows]
+
+    def count_job_summary(self, min_score=0, unique=False, days=7,
+                          location=None, hours=None, hide_blacklisted=False):
+        """Count rows of the job summary view matching the given filters."""
+        conn = sqlite3.connect(self.db_file)
+        cursor = conn.cursor()
+
+        view_name = "job_summary_unique" if unique else "job_summary"
+        where, params = self._build_summary_filters(
+            min_score, days, location, hours, hide_blacklisted)
+
+        cursor.execute(f"SELECT COUNT(*) FROM {view_name}{where}", params)
+        total = cursor.fetchone()[0]
+        conn.close()
+        return total
 
     def export_job_summary_csv(self, filepath=None, min_score=0, unique=True):
         """Export job summary to CSV file."""
@@ -354,7 +427,8 @@ class SQLiteStorage:
             filename = 'job_summary_unique.csv' if unique else 'job_summary.csv'
             filepath = self.db_file.parent.parent / filename
 
-        jobs = self.get_job_summary(min_score=min_score, unique=unique)
+        jobs = self.get_job_summary(min_score=min_score, unique=unique,
+                                    per_page=None)
 
         if not jobs:
             print("No jobs to export")

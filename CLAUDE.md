@@ -123,39 +123,78 @@ WEIGHTED_KEYWORDS = {...} # keyword weights for scoring
 
 ## Database Schema
 
-### jobs table
+Defined in `SQLiteStorage._ensure_db_exists()` (`utils/sqlite_storage.py`). Tables are
+`CREATE TABLE IF NOT EXISTS`; views are dropped and recreated on every `SQLiteStorage()` init.
+The two tables are joined by `linkedin_job_id` (no foreign key).
+
+### job_searches table
+One row per search hit — the same `linkedin_job_id` can appear many times (once per
+search template that found it).
 ```sql
-CREATE TABLE jobs (
+CREATE TABLE job_searches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT, company TEXT, location TEXT, posted_date TEXT,
-    job_url TEXT UNIQUE,
-    search_keywords TEXT, search_location TEXT,
-    search_experience TEXT, search_remote TEXT
+    linkedin_job_id TEXT,              -- NOT unique
+    title TEXT,
+    company TEXT,
+    location TEXT,
+    company_url TEXT,
+    search_keywords TEXT,
+    search_location TEXT,
+    search_experience TEXT,
+    search_remote TEXT
 )
+-- INDEX idx_job_searches_linkedin_id ON job_searches(linkedin_job_id)
 ```
 
-### job_analyses table
+### job_posts table
+One row per job: details scraped from the job page plus keyword analysis results.
 ```sql
-CREATE TABLE job_analyses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id INTEGER NOT NULL,
-    job_name TEXT,
-    company TEXT,
-    job_url TEXT,
+CREATE TABLE job_posts (
+    linkedin_job_id TEXT UNIQUE NOT NULL,
     description TEXT,
     applicant_count INTEGER,
-    employment_type TEXT,
-    job_function TEXT,
+    date_time TIMESTAMP,
     total_matches INTEGER,
     weighted_score REAL,
     matched_keywords TEXT,
     match_percentage REAL,
-    analyzed_at TIMESTAMP,
-    scrape_status TEXT,
-    FOREIGN KEY (job_id) REFERENCES jobs(id),
-    UNIQUE(job_id)
+    employment_type TEXT,
+    job_function TEXT,
+    seniority_level TEXT,
+    industries TEXT
+)
+-- INDEX idx_job_posts_score    ON job_posts(weighted_score DESC)
+-- INDEX idx_job_posts_datetime ON job_posts(date_time DESC)
+```
+
+### blacklisted_companies table
+Companies hidden in the web UI (managed via `/api/blacklist`). Matched by exact
+`company` string.
+```sql
+CREATE TABLE blacklisted_companies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company TEXT UNIQUE NOT NULL,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 ```
+
+### Views
+- **`job_summary`**: `job_posts INNER JOIN job_searches` on `linkedin_job_id`, `GROUP BY
+  linkedin_job_id` (one row per job). Columns: `linkedin_job_id, title, company, location,
+  date_time, applicant_count, weighted_score, match_percentage, total_matches,
+  matched_keywords`.
+- **`job_summary_unique`**: same columns; keeps at most 2 rows per `(title, company)`,
+  preferring the lowest non-NULL `applicant_count` (`ROW_NUMBER()` window). This is what
+  the web app uses. Because of the window function, any query on it scans the whole view
+  (~0.35 s on ~100k jobs).
+
+### date_time format
+`job_posts.date_time` is stored as UTC ISO-8601 text with a `Z` suffix, e.g.
+`2026-10-07T22:11:34Z` (may be NULL). Compare against it with the same format:
+```sql
+date_time >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
+```
+The web UI converts it to the browser's local time.
 
 ## LinkedIn HTML Selectors
 
@@ -178,7 +217,7 @@ Combined view of jobs + analysis data with all fields.
 
 ### job_summary_unique
 Deduplicated view - removes duplicate remote job postings (same title + company).
-Keeps the one with lowest applicant count.
+Keeps at most 2 per (title, company), preferring the lowest applicant count.
 
 ```sql
 -- Query deduplicated results
