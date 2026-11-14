@@ -7,6 +7,8 @@ Type=simple
 User=edu
 WorkingDirectory=/home/edu/job-scraper
 Environment=PATH=/home/edu/job-scraper/venv/bin:/usr/bin:/bin
+# Optional; the leading '-' means a missing file is not an error
+EnvironmentFile=-/home/edu/job-scraper/.env
 ExecStart=/home/edu/job-scraper/venv/bin/python web_app.py
 Restart=on-failure
 RestartSec=5

@@ -5,8 +5,8 @@ import time
 import random
 import re
 
-from config.keyword_settings import (
-    USER_AGENTS,
+from config.keyword_settings import USER_AGENTS
+from config.env import (
     SCRAPE_MIN_DELAY,
     SCRAPE_MAX_DELAY,
     BATCH_SIZE,

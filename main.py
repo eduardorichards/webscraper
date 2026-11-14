@@ -3,11 +3,11 @@ Main entry point for the Job Scraper application
 """
 
 import logging
-import os
 import time
 import random
 from logging.handlers import RotatingFileHandler
 
+from config.env import LOG_DIR, LOG_LEVEL, SEARCH_MIN_DELAY, SEARCH_MAX_DELAY
 from scraper import JobScraper, SearchConfig
 from scraper.models.keyword_config import KeywordConfig
 from scraper.core.keyword_matcher import KeywordMatcher
@@ -16,10 +16,9 @@ from utils.sqlite_storage import SQLiteStorage
 
 def setup_logging():
     """Configure logging with rotating file handler."""
-    log_dir = os.path.join(os.path.dirname(__file__), "data", "logs")
-    os.makedirs(log_dir, exist_ok=True)
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-    log_file = os.path.join(log_dir, "scraper.log")
+    log_file = LOG_DIR / "scraper.log"
 
     handler = RotatingFileHandler(
         log_file, maxBytes=5 * 1024 * 1024, backupCount=7
@@ -29,7 +28,7 @@ def setup_logging():
     )
 
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
+    logger.setLevel(LOG_LEVEL)
     logger.addHandler(handler)
 
     # Also log to stdout
@@ -66,7 +65,7 @@ def multiple_search():
 
         # Random delay between searches to avoid rate limiting
         if i < len(SEARCH_TEMPLATES):
-            delay = random.uniform(2, 4)
+            delay = random.uniform(SEARCH_MIN_DELAY, SEARCH_MAX_DELAY)
             logger.info(f"Waiting {delay:.1f}s before next search...")
             time.sleep(delay)
 

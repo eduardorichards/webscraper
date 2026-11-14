@@ -1,12 +1,7 @@
 """Configuration for keyword matching and detail page scraping."""
 
-# Rate limiting settings (~10 min for 200 jobs)
-SCRAPE_MIN_DELAY = 2      # seconds minimum delay between requests
-SCRAPE_MAX_DELAY = 4      # seconds maximum delay (avg = 3s)
-BATCH_SIZE = 50           # jobs per batch before pause
-BATCH_PAUSE = 30          # seconds pause between batches
-RETRY_DELAY = 60          # seconds wait on 429 error
-MAX_RETRIES = 3           # max retries per job on rate limit
+# Rate limiting settings (delays, batch size, retries) are environment config:
+# see config/env.py.
 
 # User agent rotation pool
 USER_AGENTS = [

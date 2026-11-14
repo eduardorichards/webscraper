@@ -1,14 +1,13 @@
 import math
-import os
 
 from flask import Flask, render_template, request, jsonify, url_for
+from config import env
 from utils.sqlite_storage import SQLiteStorage
 
 app = Flask(__name__)
 
 DAYS_OPTIONS = {"7", "14", "30", "all"}
-PER_PAGE_OPTIONS = [25, 50, 100, 200]
-DEFAULT_PER_PAGE = 50
+PER_PAGE_OPTIONS = list(env.PER_PAGE_CHOICES)
 
 
 def _int_arg(name, default, min_value=None, max_value=None):
@@ -46,9 +45,9 @@ def index():
     days = None if days_raw == "all" else int(days_raw)
 
     page = _int_arg("page", 1, min_value=1)
-    per_page = _int_arg("per_page", DEFAULT_PER_PAGE)
+    per_page = _int_arg("per_page", env.DEFAULT_PER_PAGE)
     if per_page not in PER_PAGE_OPTIONS:
-        per_page = DEFAULT_PER_PAGE
+        per_page = env.DEFAULT_PER_PAGE
     hours = _int_arg("hours", None, min_value=1, max_value=24 * 365 * 10)
     location = request.args.get("location", "").strip()
 
@@ -130,4 +129,5 @@ def api_blacklist_remove():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+    env.check_web_settings({"FLASK_DEBUG": env.FLASK_DEBUG, "HOST": env.HOST})
+    app.run(host=env.HOST, port=env.PORT, debug=env.FLASK_DEBUG)

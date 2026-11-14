@@ -3,16 +3,16 @@ import sqlite3
 from pathlib import Path
 from datetime import datetime, timezone
 
+from config.env import DB_PATH
+
 LINKEDIN_JOB_BASE_URL = "https://www.linkedin.com/jobs/view/"
 
 
 class SQLiteStorage:
     def __init__(self, db_file=None):
         if db_file is None:
-            project_root = Path(__file__).resolve().parent.parent
-            data_folder = project_root / 'data' / 'database'
-            data_folder.mkdir(parents=True, exist_ok=True)
-            db_file = data_folder / 'jobs_master.db'
+            DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+            db_file = DB_PATH
 
         self.db_file = Path(db_file)
         self._ensure_db_exists()

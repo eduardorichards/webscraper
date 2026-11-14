@@ -17,6 +17,7 @@ A Python application that scrapes job listings from LinkedIn based on configurab
 ```bash
 pip install -r requirements.txt
 ```
+3. Optionally copy `.env.example` to `.env` and adjust (see [Environment configuration](#environment-configuration))
 
 ## Usage
 
@@ -48,6 +49,35 @@ for job in jobs:
 ```
 
 ## Configuration
+
+### Environment configuration
+
+Environment-specific settings are read from environment variables, or from a `.env` file in
+the project root (see `.env.example`). Without a `.env`, the defaults below apply.
+
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `5000` | Web app port (1–65535) |
+| `HOST` | `0.0.0.0` | Web app bind address |
+| `FLASK_DEBUG` | `false` | Flask debug mode; refused unless `HOST` is `127.0.0.1`, `localhost` or `::1` |
+| `DEFAULT_PER_PAGE` | `50` | Default page size; one of 25, 50, 100, 200 |
+| `DB_PATH` | `data/database/jobs_master.db` | SQLite database file |
+| `LOG_DIR` | `data/logs` | Directory for `scraper.log`, `cron.log`, `scraper.lock` |
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL` |
+| `SCRAPE_MIN_DELAY` / `SCRAPE_MAX_DELAY` | `2` / `4` | Random delay (s) between job detail requests |
+| `BATCH_SIZE` | `50` | Detail requests per batch before pausing |
+| `BATCH_PAUSE` | `30` | Pause (s) between batches |
+| `RETRY_DELAY` | `60` | Wait (s) before retrying after HTTP 429 |
+| `MAX_RETRIES` | `3` | Max retries per job on HTTP 429 |
+| `SEARCH_MIN_DELAY` / `SEARCH_MAX_DELAY` | `2` / `4` | Random delay (s) between search templates |
+
+Relative `DB_PATH` / `LOG_DIR` resolve from the project root. Empty or unset variables use
+the default; invalid values raise `ConfigError` at startup. Real environment variables take
+precedence over `.env`. `.env` is read by python-dotenv, bash `source` (`run_scraper.sh`) and
+systemd `EnvironmentFile`, so keep it to plain `KEY=value` lines: no quotes, no inline comments,
+no `export`, no `$VAR` or `~`.
+
+Search templates, experience levels and keywords are domain config and stay in `config/`.
 
 ### Search Templates
 

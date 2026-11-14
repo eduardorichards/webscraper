@@ -6,10 +6,24 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$PROJECT_DIR/venv"
-LOCK_FILE="$PROJECT_DIR/data/logs/scraper.lock"
-LOG_FILE="$PROJECT_DIR/data/logs/cron.log"
 
-mkdir -p "$PROJECT_DIR/data/logs"
+# Load environment config (plain KEY=value lines, see .env.example)
+if [ -f "$PROJECT_DIR/.env" ]; then
+    set -a
+    source "$PROJECT_DIR/.env"
+    set +a
+fi
+
+# LOG_DIR: relative paths resolve from the project root (same as config/env.py)
+LOG_DIR="${LOG_DIR:-data/logs}"
+case "$LOG_DIR" in
+    /*) ;;
+    *) LOG_DIR="$PROJECT_DIR/$LOG_DIR" ;;
+esac
+LOCK_FILE="$LOG_DIR/scraper.lock"
+LOG_FILE="$LOG_DIR/cron.log"
+
+mkdir -p "$LOG_DIR"
 
 # Prevent overlapping runs
 if [ -f "$LOCK_FILE" ]; then

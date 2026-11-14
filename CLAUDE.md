@@ -13,9 +13,37 @@ python main.py
 ## Development Notes
 
 - The DB can be large (~100k jobs, ~490 MB in production). Any feature that lists jobs must be paginated/limited; never render the full table.
-- Web app port is configurable via the PORT env var (default 5000).
+- All code, comments, UI text, docs and commit messages must be in English.
 - Do not run the scraper (`main.py`) unless explicitly asked — it hits LinkedIn and can get the IP blocked.
 - Never deploy or SSH into the server; deployment is done manually.
+- Environment-specific config (ports, paths, log level, rate limits) lives in `config/env.py`,
+  read from environment variables / `.env` (template: `.env.example`). Domain config (search
+  templates, mappings, headers, keywords) stays in `config/settings.py` and
+  `config/keyword_settings.py` — don't move it to env. With no `.env`, defaults match the
+  previous hardcoded values.
+
+### Environment variables
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `5000` | Web app port (1–65535) |
+| `HOST` | `0.0.0.0` | Web app bind address |
+| `FLASK_DEBUG` | `false` | Flask debug mode; refused unless `HOST` is `127.0.0.1`, `localhost` or `::1` |
+| `DEFAULT_PER_PAGE` | `50` | Default page size; one of 25, 50, 100, 200 |
+| `DB_PATH` | `data/database/jobs_master.db` | SQLite database file |
+| `LOG_DIR` | `data/logs` | Directory for `scraper.log`, `cron.log`, `scraper.lock` |
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL` |
+| `SCRAPE_MIN_DELAY` / `SCRAPE_MAX_DELAY` | `2` / `4` | Random delay (s) between job detail requests |
+| `BATCH_SIZE` | `50` | Detail requests per batch before pausing |
+| `BATCH_PAUSE` | `30` | Pause (s) between batches |
+| `RETRY_DELAY` | `60` | Wait (s) before retrying after HTTP 429 |
+| `MAX_RETRIES` | `3` | Max retries per job on HTTP 429 |
+| `SEARCH_MIN_DELAY` / `SEARCH_MAX_DELAY` | `2` / `4` | Random delay (s) between search templates |
+
+Relative `DB_PATH` / `LOG_DIR` resolve from the project root. Empty or unset variables use
+the default; invalid values raise `ConfigError` at startup. Real environment variables take
+precedence over `.env`. `.env` is read by python-dotenv, bash `source` (`run_scraper.sh`) and
+systemd `EnvironmentFile`, so keep it to plain `KEY=value` lines: no quotes, no inline comments,
+no `export`, no `$VAR` or `~`.
 
 ## Project Structure
 ```
@@ -24,9 +52,11 @@ Job Scraper/
 ├── web_app.py                   # Flask web interface for viewing results
 ├── run_scraper.sh               # Cron wrapper (lock file, virtualenv, logging)
 ├── job-scraper-web.service      # systemd unit for Flask web app
+├── .env.example                 # Documented environment variables (copy to .env)
 ├── config/
+│   ├── env.py                   # Environment config (env vars / .env, validated)
 │   ├── settings.py              # Search templates, headers, mappings
-│   └── keyword_settings.py      # Keyword matching & rate limiting config
+│   └── keyword_settings.py      # Keywords, weights, user agents
 ├── scraper/
 │   ├── models/
 │   │   ├── job.py               # Job data model
@@ -48,7 +78,9 @@ Job Scraper/
 │   ├── database/jobs_master.db  # SQLite database
 │   └── logs/                    # scraper.log, cron.log, scraper.lock
 └── tests/
-    └── test_scraper.py          # Unit tests
+    ├── test_scraper.py          # Unit tests
+    ├── test_sqlite_storage.py   # Storage tests
+    └── test_env.py              # config/env.py tests
 ```
 
 ## Key Classes
@@ -107,10 +139,7 @@ main.py → analyze_keywords()
 
 ### Keyword Settings (`config/keyword_settings.py`)
 ```python
-SCRAPE_MIN_DELAY = 2      # seconds
-SCRAPE_MAX_DELAY = 4      # seconds
-BATCH_SIZE = 50           # pause every N jobs
-BATCH_PAUSE = 30          # seconds between batches
+USER_AGENTS = [...]       # user-agent rotation pool
 DEFAULT_KEYWORDS = [...]  # default keywords to match
 WEIGHTED_KEYWORDS = {...} # keyword weights for scoring
 ```
@@ -289,13 +318,16 @@ print(f"Analyzed: {stats['total_analyzed']}, Avg score: {stats['avg_score']:.1f}
 ```
 
 ## Rate Limiting
-- 2-4 second random delays between requests
+Defaults below; all configurable via env (`SCRAPE_*_DELAY`, `BATCH_*`, `RETRY_DELAY`,
+`MAX_RETRIES`, `SEARCH_*_DELAY`).
+- 2-4 second random delays between requests (and between search templates)
 - 30 second pause every 50 jobs
-- Retry with 60s wait on 429 errors
+- Retry with 60s wait on 429 errors (max 3 retries)
 - User-agent rotation
 - ~10-12 minutes for 200 jobs
 
 ## Logging
+Paths below are under `LOG_DIR` (default `data/logs`); level set by `LOG_LEVEL`.
 - `data/logs/scraper.log` — `RotatingFileHandler`, 5 MB max, 7 backups. Also mirrors to stdout.
 - `data/logs/cron.log` — stdout/stderr captured from cron runs via `run_scraper.sh`
 - `data/logs/scraper.lock` — PID lock file to prevent overlapping cron runs
@@ -309,10 +341,11 @@ print(f"Analyzed: {stats['total_analyzed']}, Avg score: {stats['avg_score']:.1f}
 - `beautifulsoup4` - HTML parsing
 - `lxml` - Parser backend
 - `flask` - Web interface
+- `python-dotenv` - Loads `.env`
 - `sqlite3` - Database (built-in)
 
 ## File Locations
-- Database: `data/database/jobs_master.db`
+- Database: `data/database/jobs_master.db` (`DB_PATH`)
 - Logs: `data/logs/`
 
 ## Server Deployment
@@ -335,6 +368,7 @@ python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 mkdir -p data/database data/logs
+cp .env.example .env   # optional; edit to override defaults
 ```
 
 ### Cron (hourly scraper)
@@ -343,7 +377,7 @@ crontab -e
 # Add:
 0 * * * * /home/edu/job-scraper/run_scraper.sh
 ```
-`run_scraper.sh` activates the virtualenv, acquires a PID lock, runs `main.py`, and logs to `data/logs/cron.log`.
+`run_scraper.sh` loads `.env` (if present), activates the virtualenv, acquires a PID lock, runs `main.py`, and logs to `$LOG_DIR/cron.log`.
 
 ### systemd (Flask web app)
 ```bash
@@ -352,6 +386,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable job-scraper-web
 sudo systemctl start job-scraper-web
 ```
+The unit reads `/home/edu/job-scraper/.env` via `EnvironmentFile=-` (optional). Restart the service after editing `.env`.
 
 ### Note on data directory
 `data/` is gitignored — the database and logs are local per machine. Create `data/database/` and `data/logs/` manually on the server after cloning.

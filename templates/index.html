@@ -55,21 +55,21 @@
     {% macro pager() %}
     <nav class="pager">
         {% if page > 1 %}
-            <a href="{{ index_url(query_args, page=1) }}">&laquo; Primera</a>
-            <a href="{{ index_url(query_args, page=page - 1) }}">&lsaquo; Anterior</a>
+            <a href="{{ index_url(query_args, page=1) }}">&laquo; First</a>
+            <a href="{{ index_url(query_args, page=page - 1) }}">&lsaquo; Previous</a>
         {% else %}
-            <span class="disabled">&laquo; Primera</span>
-            <span class="disabled">&lsaquo; Anterior</span>
+            <span class="disabled">&laquo; First</span>
+            <span class="disabled">&lsaquo; Previous</span>
         {% endif %}
-        <span>Página {{ page }} de {{ total_pages }}</span>
+        <span>Page {{ page }} of {{ total_pages }}</span>
         {% if page < total_pages %}
-            <a href="{{ index_url(query_args, page=page + 1) }}">Siguiente &rsaquo;</a>
-            <a href="{{ index_url(query_args, page=total_pages) }}">Última &raquo;</a>
+            <a href="{{ index_url(query_args, page=page + 1) }}">Next &rsaquo;</a>
+            <a href="{{ index_url(query_args, page=total_pages) }}">Last &raquo;</a>
         {% else %}
-            <span class="disabled">Siguiente &rsaquo;</span>
-            <span class="disabled">Última &raquo;</span>
+            <span class="disabled">Next &rsaquo;</span>
+            <span class="disabled">Last &raquo;</span>
         {% endif %}
-        <small>Mostrando {{ start }}–{{ end }} de {{ total }}</small>
+        <small>Showing {{ start }}–{{ end }} of {{ total }}</small>
     </nav>
     {% endmacro %}
 
