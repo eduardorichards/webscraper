@@ -15,7 +15,12 @@ python main.py
 - The DB can be large (~100k jobs, ~490 MB in production). Any feature that lists jobs must be paginated/limited; never render the full table.
 - All code, comments, UI text, docs and commit messages must be in English.
 - Do not run the scraper (`main.py`) unless explicitly asked — it hits LinkedIn and can get the IP blocked.
-- Never deploy or SSH into the server; deployment is done manually.
+- Pushing to `main` deploys to production automatically (see "Server Deployment"). Do not push
+  unless explicitly asked, and never SSH into the server.
+- The server runs Python 3.8: code must stay 3.8 compatible. No `X | Y` type unions, no
+  built-in generics like `list[int]` / `dict[str, int]` in annotations (use `typing.List` etc.),
+  no `str.removeprefix` / `removesuffix`, no `zoneinfo`, no `match` statements. CI runs the tests
+  on 3.8.
 - Environment-specific config (ports, paths, log level, rate limits) lives in `config/env.py`,
   read from environment variables / `.env` (template: `.env.example`). Domain config (search
   templates, mappings, headers, keywords) stays in `config/settings.py` and
@@ -51,8 +56,12 @@ Job Scraper/
 ├── main.py                      # Entry point - runs search + analysis pipeline
 ├── web_app.py                   # Flask web interface for viewing results
 ├── run_scraper.sh               # Cron wrapper (lock file, virtualenv, logging)
+├── deploy.sh                    # Server-side deploy (SSH forced command from CI)
 ├── job-scraper-web.service      # systemd unit for Flask web app
 ├── .env.example                 # Documented environment variables (copy to .env)
+├── .github/
+│   ├── workflows/ci.yml         # CI: tests on 3.8; deploy on push to main
+│   └── dependabot.yml           # Weekly GitHub Actions updates
 ├── config/
 │   ├── env.py                   # Environment config (env vars / .env, validated)
 │   ├── settings.py              # Search templates, headers, mappings
@@ -350,14 +359,35 @@ Paths below are under `LOG_DIR` (default `data/logs`); level set by `LOG_LEVEL`.
 
 ## Server Deployment
 
-### Git-based deploy
-Push from local machine, pull on server:
+### Automated deploy (CI/CD)
+Every push to `main` runs `.github/workflows/ci.yml`:
+1. **test** — Python 3.8, `pip install -r requirements.txt`, `python -m unittest discover -s tests -t .`.
+   Tests must not need the real DB.
+2. **deploy** (push to `main` only, after tests, `production` environment, never concurrent) —
+   joins the tailnet as an ephemeral `tag:ci` node, SSHes with `DEPLOY_SSH_KEY`, and the
+   server's `authorized_keys` forces that key to run `deploy.sh` (no remote command is sent).
+3. **`deploy.sh`** — `git pull --ff-only`, `venv/bin/pip install -r requirements.txt` only if it
+   changed, `sudo -n systemctl restart job-scraper-web`, health check on
+   `http://localhost:$PORT/` (`PORT` from `.env`, default 5000), prints the deployed short hash.
+   It must not depend on arguments or `SSH_ORIGINAL_COMMAND`, and its body stays inside `main()`
+   because `git pull` can rewrite the running script.
+
+Secrets (`production` environment): `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`, `DEPLOY_SSH_KEY`,
+`DEPLOY_HOST`, `DEPLOY_USER`. Pass them to `run:` scripts via `env:`, never inline `${{ }}`, and
+never hardcode hostnames, IPs or usernames in the workflow. Actions are pinned to commit SHAs
+(Dependabot updates them). One-time server setup (sudoers, forced-command key, Tailscale) is in
+the README "CI/CD" section.
+
+### Manual deploy (fallback)
+If CI is unavailable, push from the local machine and run the same script on the server:
 ```bash
 # Local
 git push origin main
 
 # Server
-cd /home/edu/job-scraper && git pull
+cd /home/edu/job-scraper && ./deploy.sh
+# or fully manual:
+git pull --ff-only && venv/bin/pip install -r requirements.txt && sudo systemctl restart job-scraper-web
 ```
 
 ### Server setup (first time)

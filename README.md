@@ -1,5 +1,7 @@
 # LinkedIn Job Scraper
 
+[![CI](https://github.com/eduardorichards/webscraper/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/eduardorichards/webscraper/actions/workflows/ci.yml)
+
 A Python application that scrapes job listings from LinkedIn based on configurable search parameters and stores results in a SQLite database.
 
 ## Features
@@ -202,6 +204,82 @@ Query directly in any SQLite tool:
 ```sql
 SELECT * FROM job_summary_unique;  -- Deduplicated results
 SELECT * FROM job_summary;          -- All results
+```
+
+## CI/CD
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every pull request and every push to `main`:
+
+1. **test**: installs `requirements.txt` on Python 3.8 (the server's version) and runs
+   `python -m unittest discover -s tests -t .`. Tests use temporary databases, never the real one.
+2. **deploy** (pushes to `main` only, after tests pass, in the `production` environment):
+   - The runner joins the tailnet as an **ephemeral Tailscale node** tagged `tag:ci`, using an
+     OAuth client. The server is not exposed to the internet.
+   - It opens an SSH connection with a dedicated deploy key and sends no command. The server's
+     `authorized_keys` **forces** that key to run `deploy.sh`, so the key cannot do anything else.
+   - **`deploy.sh`** runs `git pull --ff-only`, reinstalls dependencies only if
+     `requirements.txt` changed, restarts `job-scraper-web`, and runs a **health check**
+     (`curl` on `http://localhost:$PORT/`, `PORT` read from `.env`, default 5000). A failed
+     check fails the workflow. It prints the deployed short commit hash.
+
+Deploys never overlap (concurrency group `deploy`, queued rather than cancelled). Pull requests,
+including those from forks, only run tests and get no secrets. Actions are pinned to commit
+SHAs, and Dependabot (`.github/dependabot.yml`) proposes updates weekly.
+
+### Required secrets
+
+Stored in the `production` environment (Settings → Environments → production):
+
+| Secret | Description |
+|---|---|
+| `TS_OAUTH_CLIENT_ID` | Tailscale OAuth client ID |
+| `TS_OAUTH_SECRET` | Tailscale OAuth client secret |
+| `DEPLOY_SSH_KEY` | Private key of the dedicated deploy key pair |
+| `DEPLOY_HOST` | Server's Tailscale hostname or IP |
+| `DEPLOY_USER` | SSH user on the server |
+
+### One-time server setup
+
+1. **sudoers**: let the deploy user restart the web app without a password, and nothing else
+   (`sudo visudo -f /etc/sudoers.d/job-scraper-deploy`):
+   ```
+   edu ALL=(root) NOPASSWD: /usr/bin/systemctl restart job-scraper-web
+   ```
+2. **Deploy key**: generate a key pair used only for deploys (`ssh-keygen -t ed25519 -f deploy_key -N ""`),
+   store the private key as `DEPLOY_SSH_KEY`, and add the public key to `~/.ssh/authorized_keys`
+   on the server as a single line:
+   ```
+   command="/home/edu/job-scraper/deploy.sh",restrict ssh-ed25519 AAAA... github-actions-deploy
+   ```
+   `restrict` disables port forwarding, agent forwarding, X11 and PTY allocation.
+3. **Tailscale**:
+   - Define `tag:ci` in the tailnet policy file (`tagOwners`).
+   - Create an OAuth client (trust credential) with only the **`auth_keys` write** scope,
+     limited to `tag:ci`. Store its ID and secret as `TS_OAUTH_CLIENT_ID` / `TS_OAUTH_SECRET`.
+
+### Recommended hardening
+
+Not configured yet:
+
+- **Tailscale ACL**: allow `tag:ci` to reach only the server on port 22, e.g.
+  ```json
+  "grants": [{ "src": ["tag:ci"], "dst": ["<server>"], "ip": ["tcp:22"] }]
+  ```
+- **Deployment branch rule**: restrict the `production` environment to the `main` branch
+  (Settings → Environments → production → Deployment branches).
+- **Source restriction on the deploy key**: prefix the `authorized_keys` line with
+  `from="100.64.0.0/10",` so the key only works from Tailscale addresses.
+- **Host key pinning**: every runner is new, so `StrictHostKeyChecking=accept-new` trusts
+  whatever host key the server presents on first contact. Tailscale already authenticates the
+  connection to the node, but for strict checking store the server's `ssh-keyscan` output as a
+  `DEPLOY_KNOWN_HOSTS` secret, write it to the known_hosts file, and switch to
+  `StrictHostKeyChecking=yes`.
+
+### Manual deploy (fallback)
+
+If the workflow is unavailable, on the server:
+```bash
+cd /home/edu/job-scraper && ./deploy.sh
 ```
 
 ## Known Limitations
