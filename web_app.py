@@ -341,6 +341,97 @@ def api_applications_remove():
     return jsonify({"status": "ok", "linkedin_job_id": job_id})
 
 
+SHORTLIST_DEFAULTS = {"since": "2h", "min_score": 25.0, "limit": 10, "apply": "external"}
+SHORTLIST_MAX_LIMIT = 100
+SHORTLIST_MAX_SINCE_HOURS = 24 * 365
+SHORTLIST_APPLY_OPTIONS = ("external", "easy_apply", "all")
+SHORTLIST_FIELDS = ("linkedin_job_id", "title", "company", "location", "date_time",
+                    "weighted_score", "match_percentage", "matched_keywords",
+                    "seniority_level", "employment_type", "apply_type",
+                    "applicant_count", "applicant_count_qualifier")
+JOB_URL_TEMPLATE = "https://www.linkedin.com/jobs/view/{}/"
+
+
+def _parse_since(value):
+    """'2h' / '3d' → (normalized value, days, hours); ValueError if invalid."""
+    value = value.strip().lower()
+    match = re.fullmatch(r"(\d+)([hd])", value)
+    if not match:
+        raise ValueError("use <N>h or <N>d, e.g. 2h or 3d")
+    amount, unit = int(match.group(1)), match.group(2)
+    hours = amount * 24 if unit == "d" else amount
+    if amount < 1 or hours > SHORTLIST_MAX_SINCE_HOURS:
+        raise ValueError("must be between 1h and %dd" % (SHORTLIST_MAX_SINCE_HOURS // 24))
+    if unit == "d":
+        return "%dd" % amount, amount, None
+    return "%dh" % amount, None, amount
+
+
+def _shortlist_item(job):
+    item = {field: job.get(field) for field in SHORTLIST_FIELDS}
+    keywords = item["matched_keywords"] or ""
+    item["matched_keywords"] = [kw.strip() for kw in keywords.split(",") if kw.strip()]
+    item["job_url"] = JOB_URL_TEMPLATE.format(job["linkedin_job_id"])
+    return item
+
+
+@app.route("/api/shortlist", methods=["GET"])
+def api_shortlist():
+    """Best jobs to apply to right now: recent, high-scoring, not applied."""
+    params = dict(SHORTLIST_DEFAULTS)
+    invalid = {}
+    _, days, hours = _parse_since(SHORTLIST_DEFAULTS["since"])
+
+    since_raw = request.args.get("since", "").strip()
+    if since_raw:
+        try:
+            params["since"], days, hours = _parse_since(since_raw)
+        except ValueError as e:
+            invalid["since"] = str(e)
+
+    min_score_raw = request.args.get("min_score", "").strip()
+    if min_score_raw:
+        try:
+            min_score = float(min_score_raw)
+            if not math.isfinite(min_score) or min_score < 0:
+                raise ValueError
+            params["min_score"] = min_score
+        except ValueError:
+            invalid["min_score"] = "must be a number >= 0"
+
+    limit_raw = request.args.get("limit", "").strip()
+    if limit_raw:
+        try:
+            limit = int(limit_raw)
+            if not 1 <= limit <= SHORTLIST_MAX_LIMIT:
+                raise ValueError
+            params["limit"] = limit
+        except ValueError:
+            invalid["limit"] = "must be an integer between 1 and %d" % SHORTLIST_MAX_LIMIT
+
+    apply_raw = request.args.get("apply", "").strip()
+    if apply_raw:
+        if apply_raw in SHORTLIST_APPLY_OPTIONS:
+            params["apply"] = apply_raw
+        else:
+            invalid["apply"] = "must be one of: %s" % ", ".join(SHORTLIST_APPLY_OPTIONS)
+
+    if invalid:
+        return jsonify({"error": "invalid parameters", "invalid": invalid}), 400
+
+    filters = dict(min_score=params["min_score"], days=days, hours=hours,
+                   apply_type=None if params["apply"] == "all" else params["apply"],
+                   hide_blacklisted=True, hide_aggregators=True,
+                   hide_above_level=True, applied="hide")
+    storage = SQLiteStorage()
+    total = storage.count_job_summary(unique=True, **filters)
+    jobs = storage.get_job_summary(unique=True, page=1, per_page=params["limit"],
+                                   sort="weighted_score", direction="desc", **filters)
+    items = [_shortlist_item(job) for job in jobs]
+    return jsonify({"params": params, "total": total, "count": len(items),
+                    "jobs": items})
+
+
 if __name__ == "__main__":
     env.check_web_settings({"FLASK_DEBUG": env.FLASK_DEBUG, "HOST": env.HOST})
     app.run(host=env.HOST, port=env.PORT, debug=env.FLASK_DEBUG)

@@ -108,6 +108,7 @@ Job Scraper/
     ├── test_job_ids.py          # 10-digit job ID extraction/validation
     ├── test_job_criteria.py     # Criteria parsing on a current job page (no job function)
     ├── test_aggregators.py      # Aggregator file, table sync, detail-fetch skip
+    ├── test_shortlist.py        # /api/shortlist params, fixed filters, ordering, limit
     ├── test_seniority.py        # "Above my level" rule
     ├── test_scoring_version.py  # scoring_version hash, rescore script
     ├── fixtures/                # Trimmed logged-out pages: job pages (easy apply, external,
@@ -471,6 +472,15 @@ Exception: `applications.applied_on` is a plain `YYYY-MM-DD` local date.
   else low; from the 2026-11-14 distribution: median 10, p75 25, p90 47). Revisit after
   rescoring production.
 - Applicants: `<25` for `under` and for historical `25` + NULL; `>200` for `over`.
+- `GET /api/shortlist` (`api_shortlist()`): JSON of the best jobs to apply to now. Params:
+  `since` (`<N>h`/`<N>d`, 1h–365d, default `2h`; maps to the `hours`/`days` filter),
+  `min_score` (≥ 0, default 25), `limit` (1–100, default 10), `apply`
+  (`external` default / `easy_apply` / `all`). Empty = default; any invalid value → 400 with
+  `{"error", "invalid": {param: message}}`. Fixed: `hide_blacklisted`, `hide_aggregators`,
+  `hide_above_level`, `applied='hide'`; `job_summary_unique` sorted by `weighted_score` desc.
+  Response: `params` (effective), `total` (before limit), `count`, `jobs` (fields in
+  `SHORTLIST_FIELDS`, `matched_keywords` as a list, plus `job_url`
+  `https://www.linkedin.com/jobs/view/<id>/`).
 - Styling: Pico CSS, no `data-theme` (follows the OS light/dark setting). Use Pico variables
   (`--pico-*`) for every color, never hex/rgb (`test_no_light_theme_or_hardcoded_colors`).
   Below 1100px the Location and Match columns are hidden (both are in the expanded row).

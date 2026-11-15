@@ -42,3 +42,6 @@ next-tasks.txt
 # Notes and snapshots
 notes.txt
 snapshots/
+
+# Private analysis of job history (lives in a separate private repo)
+analysis/

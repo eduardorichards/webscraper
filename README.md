@@ -24,6 +24,7 @@ A Python application that scrapes job listings from LinkedIn based on configurab
 - Application tracking: mark a job as applied (date + optional notes) from the results page;
   the "Applied" filter (default "Hide applied") also covers postings with the same title and
   company
+- Shortlist API (`GET /api/shortlist`): JSON list of the best recent jobs to apply to now
 - Scores record the keyword config they were computed with (`scoring_version`);
   `scripts/rescore_jobs.py` re-scores stored jobs without re-fetching
 
@@ -252,6 +253,57 @@ print(f"Total jobs: {stats['total_jobs']}")
 print(f"Unique companies: {stats['unique_companies']}")
 print(f"Unique locations: {stats['unique_locations']}")
 ```
+
+## Shortlist API
+
+`GET /api/shortlist` returns the best jobs to apply to right now, as JSON, ordered by
+`weighted_score` (highest first).
+
+| Param | Default | Accepted values |
+|---|---|---|
+| `since` | `2h` | `<N>h` or `<N>d` (1h to 365d): `date_time` (when the job was analyzed) within that window |
+| `min_score` | `25` | number >= 0 |
+| `limit` | `10` | integer 1–100 |
+| `apply` | `external` | `external`, `easy_apply` or `all` (`all` includes unknown apply type) |
+
+Empty or missing params use the default. Any invalid value returns **400** with every bad
+param listed: `{"error": "invalid parameters", "invalid": {"limit": "..."}}`.
+
+Always applied (not configurable): hide blacklisted companies, hide aggregators, hide jobs
+above my level, and hide applied jobs, including postings with the same title and company as
+an applied job. Uses the deduplicated `job_summary_unique` view, like the web UI.
+
+```bash
+curl 'http://localhost:5000/api/shortlist?since=6h&min_score=30&limit=5'
+```
+
+```json
+{
+  "params": {"since": "6h", "min_score": 30.0, "limit": 5, "apply": "external"},
+  "total": 12,
+  "count": 5,
+  "jobs": [{
+    "linkedin_job_id": "4123456789",
+    "title": "Junior Python Developer",
+    "company": "Acme",
+    "location": "Buenos Aires, Argentina",
+    "date_time": "2026-11-14T10:00:00Z",
+    "weighted_score": 42.0,
+    "match_percentage": 30.0,
+    "matched_keywords": ["Python", "Django"],
+    "seniority_level": "Entry level",
+    "employment_type": "Full-time",
+    "apply_type": "external",
+    "applicant_count": 25,
+    "applicant_count_qualifier": "under",
+    "job_url": "https://www.linkedin.com/jobs/view/4123456789/"
+  }]
+}
+```
+
+- `total` counts all matches before `limit`; `count` is the number of jobs returned.
+- `applicant_count_qualifier` is `under`, `over` or `null` (exact). A historical `25` with a
+  `null` qualifier most likely means "under 25".
 
 ## Keyword Analysis
 
