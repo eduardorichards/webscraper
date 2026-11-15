@@ -164,6 +164,51 @@ class TestJobSummaryPagination(unittest.TestCase):
         # Without the flag, blacklisted companies are still returned
         self.assertEqual(self.storage.count_job_summary(days=None, hide_blacklisted=False), NUM_JOBS)
 
+    def _set_apply_types(self):
+        """Jobs with i % 3 == 0 → easy_apply, 1 → external, 2 → unknown (NULL)."""
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("UPDATE job_posts SET apply_type = 'easy_apply'"
+                     " WHERE CAST(linkedin_job_id AS INTEGER) % 3 = 0")
+        conn.execute("UPDATE job_posts SET apply_type = 'external',"
+                     " apply_url = 'https://jobs.example.com/apply'"
+                     " WHERE CAST(linkedin_job_id AS INTEGER) % 3 = 1")
+        conn.commit()
+        conn.close()
+
+    def test_apply_type_filter(self):
+        self._set_apply_types()
+        for apply_type, expected in (('easy_apply', 'easy_apply'),
+                                     ('external', 'external'),
+                                     ('unknown', None)):
+            with self.subTest(apply_type=apply_type):
+                jobs = self.storage.get_job_summary(
+                    days=None, apply_type=apply_type, per_page=None)
+                self.assertEqual(len(jobs), NUM_JOBS // 3)
+                self.assertEqual({j['apply_type'] for j in jobs}, {expected})
+                self.assertEqual(
+                    self.storage.count_job_summary(days=None, apply_type=apply_type),
+                    NUM_JOBS // 3)
+
+    def test_apply_type_filter_none_or_invalid_returns_all(self):
+        self._set_apply_types()
+        self.assertEqual(self.storage.count_job_summary(days=None), NUM_JOBS)
+        self.assertEqual(
+            self.storage.count_job_summary(days=None, apply_type='bogus'), NUM_JOBS)
+
+    def test_apply_type_combined_with_other_filters(self):
+        self._set_apply_types()
+        # i % 3 == 1 (external) and even i (Buenos Aires) → i % 6 == 4
+        count = self.storage.count_job_summary(
+            days=None, apply_type='external', location='buenos aires')
+        self.assertEqual(count, len([i for i in range(NUM_JOBS) if i % 6 == 4]))
+
+    def test_unique_view_exposes_apply_columns(self):
+        self._set_apply_types()
+        jobs = self.storage.get_job_summary(
+            days=None, unique=True, apply_type='external', per_page=None)
+        self.assertTrue(jobs)
+        self.assertEqual({j['apply_url'] for j in jobs}, {'https://jobs.example.com/apply'})
+
 
 if __name__ == '__main__':
     unittest.main()

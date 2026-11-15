@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 import time
 import random
 import re
+from urllib.parse import urlparse
 
 from config.keyword_settings import USER_AGENTS
 from config.env import (
@@ -44,6 +45,57 @@ def parse_applicant_text(text):
     if any(marker in text for marker in _OVER_MARKERS):
         return count, 'over'
     return count, None
+
+
+# Logged-out job pages carry no visible "Easy Apply" label: both types show an
+# "Apply" button. The type is only exposed through LinkedIn's tracking names on
+# the apply controls (checked against logged-in pages on 2026-11-14):
+#   Easy Apply → "public_jobs_apply-link-onsite" on the Apply button
+#   External   → "public_jobs_apply-link-offsite_..." in the sign-in modal
+# The external target URL is not exposed to logged-out visitors.
+_EASY_APPLY_MARKER = 'public_jobs_apply-link-onsite'
+_EXTERNAL_MARKER = 'public_jobs_apply-link-offsite'
+# Visible notice on a closed job page that LinkedIn still serves (not verified
+# against a live page, so it can only turn a result into "unknown").
+_CLOSED_MARKERS = ('no longer accepting applications', 'ya no se aceptan solicitudes')
+
+
+def is_closed_job_url(final_url):
+    """True if a job page request ended away from the job itself.
+
+    LinkedIn redirects expired jobs to a search page, e.g.
+    es.linkedin.com/jobs/administrador-de-sistemas-empleos?trk=expired_jd_redirect
+    """
+    if not final_url:
+        return False
+    return ('expired_jd_redirect' in final_url
+            or '/jobs/view/' not in urlparse(final_url).path)
+
+
+def parse_apply_type(soup):
+    """Detect the application type of a logged-out job page.
+
+    Returns 'easy_apply', 'external', or None when unknown (no markers, both
+    markers, or the page says the job is closed).
+    """
+    names = [el.get('data-tracking-control-name', '')
+             for el in soup.select('[data-tracking-control-name*="apply-link-"]')]
+    easy_apply = any(n == _EASY_APPLY_MARKER or n.startswith(_EASY_APPLY_MARKER + '_')
+                     for n in names)
+    external = any(n.startswith(_EXTERNAL_MARKER) for n in names)
+    if easy_apply == external or _shows_closed_notice(soup):
+        return None
+    return 'easy_apply' if easy_apply else 'external'
+
+
+def _shows_closed_notice(soup):
+    """True if page text outside the job description says it's closed."""
+    for text in soup.find_all(string=True):
+        lowered = text.lower()
+        if (any(marker in lowered for marker in _CLOSED_MARKERS)
+                and not text.find_parent(class_='show-more-less-html__markup')):
+            return True
+    return False
 
 
 class DetailScraper:
@@ -89,7 +141,8 @@ class DetailScraper:
             retry_count: Current retry attempt (internal use)
 
         Returns:
-            dict with job details or None if failed
+            dict with job details, {'closed': True} if the job is no longer
+            available, or None if the fetch failed
         """
         try:
             response = requests.get(
@@ -109,6 +162,13 @@ class DetailScraper:
                     return None
 
             response.raise_for_status()
+
+            # Expired jobs redirect to a search page: nothing to extract
+            if is_closed_job_url(response.url):
+                print(f"  ⚠️ Job closed (redirected to {response.url})")
+                self._apply_rate_limiting()
+                return {'closed': True}
+
             soup = BeautifulSoup(response.content, 'html.parser')
 
             # Extract all data
@@ -117,6 +177,9 @@ class DetailScraper:
                 'description': self._extract_description(soup),
                 'applicant_count': applicant_count,
                 'applicant_count_qualifier': applicant_count_qualifier,
+                'apply_type': parse_apply_type(soup),
+                # Not exposed on logged-out pages; kept for when it can be extracted
+                'apply_url': None,
                 **self._extract_job_criteria(soup)
             }
 

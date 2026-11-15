@@ -35,6 +35,8 @@
         .blacklist-add { display: flex; gap: 0.5rem; align-items: center; }
         .blacklist-add input { margin: 0; }
         tr.blacklisted { opacity: 0.4; }
+        .apply-badge { background: #0a66c2; color: #fff; padding: 0.1rem 0.45rem;
+                       border-radius: 1rem; font-size: 0.75rem; white-space: nowrap; }
         .block-btn { background: none; border: 1px solid #ccc; padding: 0.1rem 0.4rem;
                      font-size: 0.75rem; cursor: pointer; border-radius: 0.2rem; }
     </style>
@@ -128,6 +130,15 @@
                    onchange="this.form.submit()">
         </label>
         <label>
+            Apply:
+            <select name="apply" onchange="this.form.submit()">
+                <option value=""           {% if apply == ''           %}selected{% endif %}>All</option>
+                <option value="easy_apply" {% if apply == 'easy_apply' %}selected{% endif %}>Easy Apply</option>
+                <option value="external"   {% if apply == 'external'   %}selected{% endif %}>External</option>
+                <option value="unknown"    {% if apply == 'unknown'    %}selected{% endif %}>Unknown</option>
+            </select>
+        </label>
+        <label>
             <input type="hidden" name="hide_blacklisted" value="0">
             <input type="checkbox" name="hide_blacklisted" value="1" {% if hide_blacklisted %}checked{% endif %}
                    onchange="this.form.submit()">
@@ -158,6 +169,7 @@
                     {{ sort_th('total_matches', 'Matches', 'desc') }}
                     {{ sort_th('weighted_score', 'Score', 'desc') }}
                     {{ sort_th('match_percentage', 'Match %', 'desc') }}
+                    <th>Apply</th>
                     <th>Link</th>
                     <th>Block</th>
                 </tr>
@@ -174,6 +186,15 @@
                     <td>{{ job.total_matches if job.total_matches is not none else "-" }}</td>
                     <td>{{ "%.1f"|format(job.weighted_score) if job.weighted_score is not none else "-" }}</td>
                     <td>{{ "%.1f"|format(job.match_percentage) ~ "%" if job.match_percentage is not none else "-" }}</td>
+                    <td>
+                        {% if job.apply_type == 'easy_apply' %}
+                        <span class="apply-badge">Easy Apply</span>
+                        {% elif job.apply_type == 'external' and job.apply_url and job.apply_url.startswith(('http://', 'https://')) %}
+                        <a href="{{ job.apply_url }}" target="_blank" rel="noopener noreferrer">External</a>
+                        {% elif job.apply_type == 'external' %}
+                        External
+                        {% else %}-{% endif %}
+                    </td>
                     <td>
                         {% if job.linkedin_job_id %}
                         <a href="https://www.linkedin.com/jobs/view/{{ job.linkedin_job_id }}/" target="_blank" rel="noopener">View</a>

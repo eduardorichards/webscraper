@@ -51,7 +51,11 @@ class KeywordMatcher:
             # Scrape job details
             details = self.detail_scraper.scrape_job_details(job_url)
 
-            if details:
+            if details and details.get('closed'):
+                # Saved like a failed fetch: no description, scraped_at NULL
+                result.keyword_matches = {kw: 0 for kw in self.keyword_config.keywords}
+                print(f"      ✗ Job closed")
+            elif details:
                 result.scraped_at = utc_now_iso()
                 result.description = details.get('description')
                 result.applicant_count = details.get('applicant_count')
@@ -60,6 +64,8 @@ class KeywordMatcher:
                 result.job_function = details.get('job_function')
                 result.seniority_level = details.get('seniority_level')
                 result.industries = details.get('industries')
+                result.apply_type = details.get('apply_type')
+                result.apply_url = details.get('apply_url')
 
                 # Analyze for keywords
                 result.keyword_matches = self.analyzer.analyze(result.description)

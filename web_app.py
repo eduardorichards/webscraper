@@ -50,6 +50,9 @@ def index():
         per_page = env.DEFAULT_PER_PAGE
     hours = _int_arg("hours", None, min_value=1, max_value=24 * 365 * 10)
     location = request.args.get("location", "").strip()
+    apply_raw = request.args.get("apply", "")
+    if apply_raw not in SQLiteStorage.APPLY_FILTERS:
+        apply_raw = ""
 
     # Checkbox is paired with a hidden "0" input, so the last value wins;
     # absent entirely (first visit) → hide by default.
@@ -63,7 +66,8 @@ def index():
 
     filters = dict(min_score=min_score, unique=True, days=days,
                    location=location or None, hours=hours,
-                   hide_blacklisted=hide_blacklisted)
+                   hide_blacklisted=hide_blacklisted,
+                   apply_type=apply_raw or None)
 
     storage = SQLiteStorage()
     total = storage.count_job_summary(**filters)
@@ -84,6 +88,7 @@ def index():
         "location": location,
         "hours": hours if hours is not None else "",
         "hide_blacklisted": "1" if hide_blacklisted else "0",
+        "apply": apply_raw,
         "per_page": per_page,
         "sort": sort,
         "dir": direction,
@@ -93,7 +98,7 @@ def index():
     return render_template("index.html", jobs=jobs, stats=stats,
                            min_score=min_score, blacklisted=blacklisted,
                            days=days_raw, location=location, hours=hours,
-                           hide_blacklisted=hide_blacklisted,
+                           hide_blacklisted=hide_blacklisted, apply=apply_raw,
                            per_page=per_page, per_page_options=PER_PAGE_OPTIONS,
                            sort=sort, direction=direction,
                            page=page, total=total, total_pages=total_pages,

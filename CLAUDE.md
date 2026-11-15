@@ -93,6 +93,9 @@ Job Scraper/
     ├── test_migrations.py       # Schema migration idempotency
     ├── test_search_runs.py      # search_runs tracking (HTTP mocked)
     ├── test_applicant_parsing.py # Applicant caption parsing
+    ├── test_apply_detection.py  # Apply type / closed-job detection (uses fixtures/)
+    ├── test_web_app.py          # Web UI apply column and filter (Flask test client)
+    ├── fixtures/                # Sanitized logged-out job pages (easy apply, external)
     └── test_env.py              # config/env.py tests
 ```
 
@@ -139,7 +142,8 @@ main.py → analyze_keywords()
   → KeywordMatcher.analyze_jobs()
     → SQLiteStorage.get_jobs_without_analysis()
     → For each job:
-      → DetailScraper.scrape_job_details(url)  [2-4s delay; parse_applicant_text()]
+      → DetailScraper.scrape_job_details(url)  [2-4s delay; parse_applicant_text(),
+                                                parse_apply_type(); {'closed': True} if expired]
       → KeywordAnalyzer.analyze(description)
       → SQLiteStorage.save_job_analysis()
     → Sort by weighted_score
@@ -238,7 +242,9 @@ CREATE TABLE job_posts (
     seniority_level TEXT,
     industries TEXT,
     scraped_at TEXT,                   -- UTC, when details were fetched; NULL if the fetch failed or old row
-    applicant_count_qualifier TEXT     -- 'under' | 'over' | NULL (exact)
+    applicant_count_qualifier TEXT,    -- 'under' | 'over' | NULL (exact)
+    apply_type TEXT,                   -- 'easy_apply' | 'external' | NULL (unknown)
+    apply_url TEXT                     -- external apply URL; currently always NULL (see below)
 )
 -- INDEX idx_job_posts_score    ON job_posts(weighted_score DESC)
 -- INDEX idx_job_posts_datetime ON job_posts(date_time DESC)
@@ -263,6 +269,29 @@ Historical data (before the qualifier column existed):
   them untouched.
 - When sorting/filtering by applicants, treat `25`+NULL like `25`+`under`.
 
+### Application type
+Logged-out job pages show an "Apply" button for both types; there is no visible "Easy Apply"
+label. `parse_apply_type()` in `detail_scraper.py` reads LinkedIn's tracking names on the
+apply controls (verified against logged-in pages on 2026-11-14):
+
+| Marker (`data-tracking-control-name`) | apply_type |
+|---|---|
+| `public_jobs_apply-link-onsite` (Apply button) | `easy_apply` |
+| `public_jobs_apply-link-offsite_...` (sign-in modal) | `external` |
+| neither, both, or a "No longer accepting applications" notice | NULL |
+
+- Unknown/closed must never become `easy_apply`.
+- The external target URL is not exposed to logged-out visitors, so `apply_url` is saved as
+  NULL. The column and UI link are kept for when it can be extracted.
+- Closed jobs: `is_closed_job_url()` flags a fetch whose final URL has `trk=expired_jd_redirect`
+  or no `/jobs/view/` in its path (LinkedIn redirects expired jobs to a search page).
+  `scrape_job_details()` returns `{'closed': True}` and `KeywordMatcher` saves the row like a
+  failed fetch (no description, `scraped_at` NULL, `apply_type` NULL).
+- These are tracking names, not a public contract: if LinkedIn changes them, detection falls
+  back to NULL. Re-check against `tests/fixtures/` and a live page.
+- Existing rows stay NULL (no backfill). Web UI filter: `?apply=easy_apply|external|unknown`
+  (`unknown` = `apply_type IS NULL`, which includes all rows analyzed before the column existed).
+
 ### blacklisted_companies table
 Companies hidden in the web UI (managed via `/api/blacklist`). Matched by exact
 `company` string.
@@ -278,7 +307,7 @@ CREATE TABLE blacklisted_companies (
 - **`job_summary`**: `job_posts INNER JOIN job_searches` on `linkedin_job_id`, `GROUP BY
   linkedin_job_id` (one row per job). Columns: `linkedin_job_id, title, company, location,
   date_time, applicant_count, weighted_score, match_percentage, total_matches,
-  matched_keywords`.
+  matched_keywords, apply_type, apply_url`.
 - **`job_summary_unique`**: same columns; keeps at most 2 rows per `(title, company)`,
   preferring the lowest non-NULL `applicant_count` (`ROW_NUMBER()` window). This is what
   the web app uses. Because of the window function, any query on it scans the whole view
@@ -306,6 +335,8 @@ The web UI converts it to the browser's local time.
 - Description: `div.show-more-less-html__markup`
 - Applicants: `span.num-applicants__caption`
 - Criteria: `li.description__job-criteria-item`
+- Apply type: `[data-tracking-control-name]` containing `apply-link-onsite` / `apply-link-offsite`
+  (see "Application type")
 
 ## SQL Views
 

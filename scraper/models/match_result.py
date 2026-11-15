@@ -22,6 +22,8 @@ class MatchResult:
         self.industries = None
         self.date_time = None  # Timestamp when analysis started (set even if the fetch fails)
         self.scraped_at = None  # Timestamp when details were fetched (None if the fetch failed)
+        self.apply_type = None  # 'easy_apply' / 'external', None if unknown
+        self.apply_url = None  # External apply URL, when the page exposes it
 
         # Match results
         self.keyword_matches = {}  # {keyword: count}
@@ -61,6 +63,8 @@ class MatchResult:
             'applicant_count_qualifier': self.applicant_count_qualifier,
             'date_time': self.date_time,
             'scraped_at': self.scraped_at,
+            'apply_type': self.apply_type,
+            'apply_url': self.apply_url,
             'total_matches': self.total_matches,
             'weighted_score': self.weighted_score,
             'matched_keywords': self.matched_keywords,

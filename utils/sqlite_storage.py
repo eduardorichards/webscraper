@@ -124,6 +124,9 @@ class SQLiteStorage:
             SET applicant_count = 200, applicant_count_qualifier = 'over'
             WHERE applicant_count = 201 AND applicant_count_qualifier IS NULL
             """)
+        # 'easy_apply' | 'external' | NULL (unknown); apply_url only for external
+        self._add_column_if_missing(cursor, 'job_posts', 'apply_type', 'TEXT')
+        self._add_column_if_missing(cursor, 'job_posts', 'apply_url', 'TEXT')
 
         # Indexes
         cursor.execute("""
@@ -157,7 +160,9 @@ class SQLiteStorage:
             jp.weighted_score,
             jp.match_percentage,
             jp.total_matches,
-            jp.matched_keywords
+            jp.matched_keywords,
+            jp.apply_type,
+            jp.apply_url
         FROM job_posts jp
         INNER JOIN job_searches js ON js.linkedin_job_id = jp.linkedin_job_id
         GROUP BY jp.linkedin_job_id
@@ -170,7 +175,7 @@ class SQLiteStorage:
         CREATE VIEW job_summary_unique AS
         SELECT linkedin_job_id, title, company, location, date_time,
                applicant_count, weighted_score, match_percentage,
-               total_matches, matched_keywords
+               total_matches, matched_keywords, apply_type, apply_url
         FROM (
             SELECT *,
                 ROW_NUMBER() OVER (
@@ -362,8 +367,8 @@ class SQLiteStorage:
                 linkedin_job_id, description, applicant_count, date_time,
                 total_matches, weighted_score, matched_keywords, match_percentage,
                 employment_type, job_function, seniority_level, industries,
-                applicant_count_qualifier, scraped_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                applicant_count_qualifier, scraped_at, apply_type, apply_url
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             match_result.linkedin_job_id,
             match_result.description,
@@ -379,6 +384,8 @@ class SQLiteStorage:
             match_result.industries,
             match_result.applicant_count_qualifier,
             match_result.scraped_at,
+            match_result.apply_type,
+            match_result.apply_url,
         ))
 
         conn.commit()
@@ -466,9 +473,12 @@ class SQLiteStorage:
     SORT_DIRECTIONS = {'asc': 'ASC', 'desc': 'DESC'}
     DEFAULT_SORT = 'date_time'
     DEFAULT_DIRECTION = 'desc'
+    # Application type filter values; 'unknown' matches NULL
+    APPLY_FILTERS = ('easy_apply', 'external', 'unknown')
 
     def _build_summary_filters(self, min_score=0, days=None, location=None,
-                               hours=None, hide_blacklisted=False):
+                               hours=None, hide_blacklisted=False,
+                               apply_type=None):
         """Build the WHERE clause and bound params shared by summary queries."""
         clauses = ["weighted_score >= ?"]
         params = [min_score]
@@ -491,12 +501,18 @@ class SQLiteStorage:
                 "(SELECT company FROM blacklisted_companies))"
             )
 
+        if apply_type == 'unknown':
+            clauses.append("apply_type IS NULL")
+        elif apply_type in self.APPLY_FILTERS:
+            clauses.append("apply_type = ?")
+            params.append(apply_type)
+
         return " WHERE " + " AND ".join(clauses), params
 
     def get_job_summary(self, min_score=0, limit=None, unique=False, days=7,
                         page=1, per_page=50, location=None, hours=None,
                         hide_blacklisted=False, sort=DEFAULT_SORT,
-                        direction=DEFAULT_DIRECTION):
+                        direction=DEFAULT_DIRECTION, apply_type=None):
         """Get one page of the job summary view.
 
         per_page=None disables pagination (all matching rows, or `limit`).
@@ -508,7 +524,7 @@ class SQLiteStorage:
 
         view_name = "job_summary_unique" if unique else "job_summary"
         where, params = self._build_summary_filters(
-            min_score, days, location, hours, hide_blacklisted)
+            min_score, days, location, hours, hide_blacklisted, apply_type)
 
         if sort not in self.SORT_COLUMNS or direction not in self.SORT_DIRECTIONS:
             sort, direction = self.DEFAULT_SORT, self.DEFAULT_DIRECTION
@@ -535,14 +551,15 @@ class SQLiteStorage:
         return [dict(row) for row in rows]
 
     def count_job_summary(self, min_score=0, unique=False, days=7,
-                          location=None, hours=None, hide_blacklisted=False):
+                          location=None, hours=None, hide_blacklisted=False,
+                          apply_type=None):
         """Count rows of the job summary view matching the given filters."""
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
 
         view_name = "job_summary_unique" if unique else "job_summary"
         where, params = self._build_summary_filters(
-            min_score, days, location, hours, hide_blacklisted)
+            min_score, days, location, hours, hide_blacklisted, apply_type)
 
         cursor.execute(f"SELECT COUNT(*) FROM {view_name}{where}", params)
         total = cursor.fetchone()[0]
@@ -567,7 +584,8 @@ class SQLiteStorage:
         columns = [
             'linkedin_job_id', 'title', 'company', 'location',
             'date_time', 'applicant_count', 'weighted_score',
-            'match_percentage', 'total_matches', 'matched_keywords'
+            'match_percentage', 'total_matches', 'matched_keywords',
+            'apply_type', 'apply_url'
         ]
 
         with open(filepath, 'w', newline='', encoding='utf-8') as f:

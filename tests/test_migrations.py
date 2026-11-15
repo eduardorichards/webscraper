@@ -96,6 +96,8 @@ class TestMigrations(unittest.TestCase):
         self.assertIn('search_run_id', self._columns('job_searches'))
         self.assertIn('scraped_at', self._columns('job_posts'))
         self.assertIn('applicant_count_qualifier', self._columns('job_posts'))
+        self.assertIn('apply_type', self._columns('job_posts'))
+        self.assertIn('apply_url', self._columns('job_posts'))
         self.assertEqual(
             self._columns('search_runs'),
             ['id', 'template_name', 'keywords', 'location', 'started_at',
@@ -125,6 +127,9 @@ class TestMigrations(unittest.TestCase):
             " WHERE scraped_at IS NOT NULL OR search_run_id IS NOT NULL")[0][0], 0)
         self.assertEqual(self._query(
             "SELECT COUNT(*) FROM job_posts WHERE scraped_at IS NOT NULL")[0][0], 0)
+        self.assertEqual(self._query(
+            "SELECT COUNT(*) FROM job_posts"
+            " WHERE apply_type IS NOT NULL OR apply_url IS NOT NULL")[0][0], 0)
         # Other data untouched
         self.assertEqual(
             self._query("SELECT date_time, weighted_score FROM job_posts"
@@ -172,6 +177,11 @@ class TestMigrations(unittest.TestCase):
         storage = self._open_storage()
         self.assertEqual(storage.count_job_summary(days=None), 3)
         self.assertEqual(storage.count_job_summary(days=None, unique=True), 3)
+        self.assertEqual(
+            storage.count_job_summary(days=None, unique=True, apply_type='unknown'), 3)
+        job = storage.get_job_summary(days=None, unique=True, per_page=None)[0]
+        self.assertIn('apply_type', job)
+        self.assertIn('apply_url', job)
 
 
 if __name__ == '__main__':
