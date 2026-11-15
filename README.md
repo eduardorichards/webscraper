@@ -133,6 +133,8 @@ Job Scraper/
 │   ├── models/             # Data models (Job, SearchConfig)
 │   ├── core/               # Scraper and URL builder
 │   └── extractors/         # LinkedIn HTML parser
+├── scripts/
+│   └── backfill_apply_type.py  # One-off apply_type backfill
 ├── utils/
 │   ├── sqlite_storage.py   # SQLite database handler
 │   └── json_storage.py     # JSON file storage
@@ -164,7 +166,7 @@ All timestamps are UTC ISO-8601 text with seconds and a `Z` suffix, e.g. `2026-1
   Historical rows with `applicant_count = 25` and no qualifier most likely mean "under 25".
 - `apply_type`: `easy_apply`, `external`, or NULL (unknown: job closed, fetch failed, no
   marker on the page, or analyzed before this column existed; existing rows are not
-  backfilled). `apply_url` is meant for the external target, but logged-out job pages don't
+  backfilled; see "Backfill apply_type" below). `apply_url` is meant for the external target, but logged-out job pages don't
   expose it, so it is currently always NULL and the UI shows "External" without a link.
 - Closed jobs: LinkedIn redirects an expired job page to a search page
   (`trk=expired_jd_redirect`). The analysis then saves the job like a failed fetch (no
@@ -203,6 +205,30 @@ Configure keywords in `config/keyword_settings.py`:
 DEFAULT_KEYWORDS = ["Python", "Java", "Docker", ...]
 WEIGHTED_KEYWORDS = {"Python": 2.0, "Java": 2.5, ...}
 ```
+
+## Backfill apply_type (one-off)
+`scripts/backfill_apply_type.py` re-fetches the job page of recently analyzed rows with
+`apply_type IS NULL` and sets only `apply_type` / `apply_url` (never description, scores or
+other columns). It sends requests to LinkedIn: run it sparingly.
+```bash
+python -m scripts.backfill_apply_type --dry-run                # list what would be fetched
+python -m scripts.backfill_apply_type                          # last 3 days, up to 300 jobs
+python -m scripts.backfill_apply_type --since 12h --min-score 5 --limit 50
+```
+- Selection: `apply_type IS NULL`, `date_time` within `--since` (`<N>d` / `<N>h`, default
+  `3d`), `weighted_score >= --min-score` (default 0), numeric IDs of at least 10 digits,
+  newest first, at most `--limit` (default 300).
+- Uses `DetailScraper` as is (headers, delays, batch pauses, 429 retries). Each update is
+  written immediately with `WHERE apply_type IS NULL`, so it never overwrites a value.
+- Closed jobs, pages without a marker and failed fetches stay NULL, so every run re-fetches
+  them (bounded by `--since` / `--limit`).
+- Stops after 5 consecutive failed fetches (exit 1): `DetailScraper` doesn't wait after
+  non-429 errors, so a block would otherwise mean back-to-back requests.
+- Lock: takes `LOG_DIR/scraper.lock` with `run_scraper.sh`'s PID format. If a live process
+  holds it, it exits 1 with a message; a stale lock is replaced. While the backfill runs,
+  the hourly cron run skips (300 jobs ≈ 20 min). `--dry-run` doesn't take the lock.
+- Logs progress to `scraper.log` + stdout and ends with
+  `Summary: easy_apply=… / external=… / closed=… / unknown=… / errors=…`.
 
 ## Export to CSV
 

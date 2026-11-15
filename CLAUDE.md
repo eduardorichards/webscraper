@@ -81,6 +81,8 @@ Job Scraper/
 │   │   └── linkedin_extractor.py # LinkedInExtractor - search page parsing
 │   └── analyzers/
 │       └── keyword_analyzer.py  # KeywordAnalyzer - regex matching
+├── scripts/
+│   └── backfill_apply_type.py   # One-off apply_type backfill (fetches LinkedIn)
 ├── utils/
 │   ├── sqlite_storage.py        # SQLiteStorage class (schema + migrations)
 │   └── time_utils.py            # utc_now_iso() timestamp helper
@@ -95,6 +97,7 @@ Job Scraper/
     ├── test_applicant_parsing.py # Applicant caption parsing
     ├── test_apply_detection.py  # Apply type / closed-job detection (uses fixtures/)
     ├── test_web_app.py          # Web UI apply column and filter (Flask test client)
+    ├── test_backfill_apply_type.py # Backfill selection, no-overwrite, lock (HTTP mocked)
     ├── fixtures/                # Sanitized logged-out job pages (easy apply, external)
     └── test_env.py              # config/env.py tests
 ```
@@ -289,7 +292,8 @@ apply controls (verified against logged-in pages on 2026-11-14):
   failed fetch (no description, `scraped_at` NULL, `apply_type` NULL).
 - These are tracking names, not a public contract: if LinkedIn changes them, detection falls
   back to NULL. Re-check against `tests/fixtures/` and a live page.
-- Existing rows stay NULL (no backfill). Web UI filter: `?apply=easy_apply|external|unknown`
+- Migration doesn't backfill; `scripts/backfill_apply_type.py` can fill recent rows (see
+  "Common Tasks"). Web UI filter: `?apply=easy_apply|external|unknown`
   (`unknown` = `apply_type IS NULL`, which includes all rows analyzed before the column existed).
 
 ### blacklisted_companies table
@@ -356,6 +360,30 @@ SELECT * FROM job_summary;
 ```
 
 ## Common Tasks
+
+### Backfill apply_type (one-off)
+`scripts/backfill_apply_type.py` re-fetches the job page of recently analyzed rows with
+`apply_type IS NULL` and sets only `apply_type` / `apply_url` (never description, scores or
+other columns). It hits LinkedIn, so don't run it unless asked.
+```bash
+python -m scripts.backfill_apply_type --dry-run                # list what would be fetched
+python -m scripts.backfill_apply_type                          # last 3 days, up to 300 jobs
+python -m scripts.backfill_apply_type --since 12h --min-score 5 --limit 50
+```
+- Selection: `apply_type IS NULL`, `date_time` within `--since` (`<N>d` / `<N>h`, default
+  `3d`), `weighted_score >= --min-score` (default 0), numeric IDs of at least 10 digits,
+  newest first, at most `--limit` (default 300).
+- Uses `DetailScraper` as is (headers, delays, batch pauses, 429 retries). Each update is
+  written immediately with `WHERE apply_type IS NULL`, so it never overwrites a value.
+- Closed jobs, pages without a marker and failed fetches stay NULL, so every run re-fetches
+  them (bounded by `--since` / `--limit`).
+- Stops after 5 consecutive failed fetches (exit 1): `DetailScraper` doesn't wait after
+  non-429 errors, so a block would otherwise mean back-to-back requests.
+- Lock: takes `LOG_DIR/scraper.lock` with `run_scraper.sh`'s PID format. If a live process
+  holds it, it exits 1 with a message; a stale lock is replaced. While the backfill runs,
+  the hourly cron run skips (300 jobs ≈ 20 min). `--dry-run` doesn't take the lock.
+- Logs progress to `scraper.log` + stdout and ends with
+  `Summary: easy_apply=… / external=… / closed=… / unknown=… / errors=…`.
 
 ### Export to CSV (one-liner)
 ```bash
