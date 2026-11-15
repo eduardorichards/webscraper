@@ -1,9 +1,13 @@
 """Orchestrator for keyword matching workflow."""
+import logging
+
 from utils.time_utils import utc_now_iso
 
 from ..models.match_result import MatchResult, LINKEDIN_JOB_BASE_URL
 from ..analyzers.keyword_analyzer import KeywordAnalyzer
 from .detail_scraper import DetailScraper
+
+logger = logging.getLogger(__name__)
 
 
 class KeywordMatcher:
@@ -15,20 +19,26 @@ class KeywordMatcher:
         self.detail_scraper = DetailScraper()
         self.analyzer = KeywordAnalyzer(keyword_config)
 
-    def analyze_jobs(self, skip_analyzed=True):
+    def analyze_jobs(self, skip_analyzed=True, since=None):
         """
         Analyze jobs for keyword matches.
 
+        Jobs from aggregator companies are not fetched: their search hits stay
+        in job_searches without a job_posts row. The number skipped is logged.
+
         Args:
             skip_analyzed: Skip jobs that already have analysis (default True)
+            since: UTC ISO timestamp; count skipped aggregator jobs first seen
+                at or after it (default: all pending ones)
 
         Returns:
             list[MatchResult]: Results sorted by weighted_score descending
         """
-        if skip_analyzed:
-            jobs = self.storage.get_jobs_without_analysis()
-        else:
-            jobs = self.storage.get_jobs_without_analysis()
+        jobs = self.storage.get_jobs_without_analysis(exclude_aggregators=True)
+        skipped = self.storage.count_skipped_aggregator_jobs(since=since)
+        logger.info(
+            "Skipped %d detail fetches for aggregator companies%s",
+            skipped, "" if since is None else " (new in this run)")
 
         if not jobs:
             print("No jobs to analyze.")

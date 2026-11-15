@@ -84,10 +84,10 @@ class TestSearchRuns(unittest.TestCase):
             _template("Repeat", "Java"),
         ]
         self._run(templates, [
-            _response(['1000001', '1000002', '1000003']),
-            _response(['1000003', '1000004']),           # 1000003 already seen
+            _response(['4100000001', '4100000002', '4100000003']),
+            _response(['4100000003', '4100000004']),           # 4100000003 already seen
             _response([], status=503),                   # HTTP error
-            _response(['1000001', '1000001']),           # all seen, dup in page
+            _response(['4100000001', '4100000001']),           # all seen, dup in page
         ])
 
         runs = self._runs()
@@ -112,8 +112,8 @@ class TestSearchRuns(unittest.TestCase):
 
     def test_job_searches_linked_to_run(self):
         self._run([_template("A", "Java"), _template("B", "Python")], [
-            _response(['2000001', '2000002']),
-            _response(['2000002']),
+            _response(['4200000001', '4200000002']),
+            _response(['4200000002']),
         ])
         runs = self._runs()
 
@@ -125,14 +125,14 @@ class TestSearchRuns(unittest.TestCase):
 
         self.assertEqual(
             [(r[0], r[1]) for r in rows],
-            [('2000001', runs[0]['id']), ('2000002', runs[0]['id']),
-             ('2000002', runs[1]['id'])])
+            [('4200000001', runs[0]['id']), ('4200000002', runs[0]['id']),
+             ('4200000002', runs[1]['id'])])
         for row in rows:
             self.assertRegex(row[2], ISO_UTC)
 
     def test_templates_are_not_mutated(self):
         templates = [_template("A", "Java")]
-        self._run(templates, [_response(['3000001'])])
+        self._run(templates, [_response(['4300000001'])])
         self.assertEqual(templates[0]["name"], "A")
 
     def test_connection_error_is_recorded(self):

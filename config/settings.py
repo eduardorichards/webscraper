@@ -2,6 +2,12 @@
 
 # LinkedIn scraping settings
 LINKEDIN_BASE_URL = "https://www.linkedin.com/jobs/search/"
+# Guest endpoint behind the "See more jobs" button: same query params as the
+# search page plus start=<cards already shown>. Returns bare job cards.
+LINKEDIN_SEE_MORE_URL = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
+# Cards per page (observed 2026-11-14). A page with fewer cards is the last one.
+SEARCH_FIRST_PAGE_SIZE = 60
+SEARCH_MORE_PAGE_SIZE = 10
 
 # Request headers for better LinkedIn compatibility
 DEFAULT_HEADERS = {
@@ -35,6 +41,14 @@ EXPERIENCE_LEVELS = {
     5: "Director",
     6: "Executive"
 }
+
+# Seniority levels shown on job pages (job_posts.seniority_level), lowest first
+SENIORITY_ORDER = [EXPERIENCE_LEVELS[level] for level in sorted(EXPERIENCE_LEVELS)]
+
+# Levels I'm targeting. Jobs whose seniority_level ranks above the highest of
+# these are hidden by the web UI's "Hide above my level" filter. Unranked
+# values ("Not Applicable", NULL) are never hidden.
+TARGET_SENIORITY_LEVELS = ["Internship", "Entry level", "Associate"]
 
 # Valid experience level range
 MIN_EXPERIENCE_LEVEL = 1
@@ -73,7 +87,7 @@ SEARCH_TEMPLATES = [
         "experience_levels": [1, 2],
         "remote": False,
         "time_posted": "1h",
-        "max_results": 100
+        "max_results": 250
     },
     {
         "name": "Java Arg Jr",
@@ -82,7 +96,7 @@ SEARCH_TEMPLATES = [
         "experience_levels": [1, 2],
         "remote": False,
         "time_posted": "1h",
-        "max_results": 100
+        "max_results": 250
     },
     {
         "name": "Python Arg Jr",
@@ -91,7 +105,7 @@ SEARCH_TEMPLATES = [
         "experience_levels": [1, 2],
         "remote": False,
         "time_posted": "1h",
-        "max_results": 100
+        "max_results": 250
     },    
     {
         "name": "Backend Arg Jr Remote",
@@ -100,7 +114,7 @@ SEARCH_TEMPLATES = [
         "experience_levels": [1, 2],
         "remote": False,
         "time_posted": "1h",
-        "max_results": 100
+        "max_results": 250
     },
     {
         "name": "Software Developer Arg Jr Remote",
@@ -109,7 +123,7 @@ SEARCH_TEMPLATES = [
         "experience_levels": [1, 2],
         "remote": False,
         "time_posted": "1h",
-        "max_results": 100
+        "max_results": 250
     },
     {
         "name": "Fullstack Arg Jr Remote",
@@ -118,7 +132,7 @@ SEARCH_TEMPLATES = [
         "experience_levels": [1, 2],
         "remote": False,
         "time_posted": "1h",
-        "max_results": 100
+        "max_results": 250
     },
     {
         "name": "Java Latam Remote",
@@ -127,7 +141,7 @@ SEARCH_TEMPLATES = [
         "experience_levels": [1, 2],
         "remote": True,
         "time_posted": "1h",
-        "max_results": 100
+        "max_results": 250
     },
     {
         "name": "Python Latam Remote",
@@ -136,7 +150,7 @@ SEARCH_TEMPLATES = [
         "experience_levels": [1, 2],
         "remote": True,
         "time_posted": "1h",
-        "max_results": 100
+        "max_results": 250
     },    
     {
         "name": "Backend Latam Remote",
@@ -145,7 +159,7 @@ SEARCH_TEMPLATES = [
         "experience_levels": [1, 2],
         "remote": True,
         "time_posted": "1h",
-        "max_results": 100
+        "max_results": 250
     },
     {
         "name": "Software Developer Latam Remote",
@@ -154,7 +168,7 @@ SEARCH_TEMPLATES = [
         "experience_levels": [1, 2],
         "remote": True,
         "time_posted": "1h",
-        "max_results": 100
+        "max_results": 250
     },
     {
         "name": "Fullstack Latam Remote",
@@ -163,7 +177,7 @@ SEARCH_TEMPLATES = [
         "experience_levels": [1, 2],
         "remote": True,
         "time_posted": "1h",
-        "max_results": 100
+        "max_results": 250
     },
     {
         "name": "Developer Jr Latam Remote",
@@ -172,7 +186,7 @@ SEARCH_TEMPLATES = [
         "experience_levels": [1, 2],
         "remote": True,
         "time_posted": "1h",
-        "max_results": 100
+        "max_results": 250
     },
     
 ]

@@ -32,6 +32,7 @@ class TestDefaults(unittest.TestCase):
             "MAX_RETRIES": 3,
             "SEARCH_MIN_DELAY": 2,
             "SEARCH_MAX_DELAY": 4,
+            "SEARCH_MAX_PAGES": 4,
         })
 
     def test_empty_values_use_defaults(self):
@@ -87,6 +88,7 @@ class TestOverrides(unittest.TestCase):
             "MAX_RETRIES": "0",
             "SEARCH_MIN_DELAY": "3",
             "SEARCH_MAX_DELAY": "3",
+            "SEARCH_MAX_PAGES": "1",
         })
         self.assertEqual(settings["SCRAPE_MIN_DELAY"], 0.5)
         self.assertEqual(settings["SCRAPE_MAX_DELAY"], 1.5)
@@ -96,6 +98,7 @@ class TestOverrides(unittest.TestCase):
         self.assertEqual(settings["MAX_RETRIES"], 0)
         self.assertEqual(settings["SEARCH_MIN_DELAY"], 3)
         self.assertEqual(settings["SEARCH_MAX_DELAY"], 3)
+        self.assertEqual(settings["SEARCH_MAX_PAGES"], 1)
 
 
 class TestInvalidValues(unittest.TestCase):
@@ -132,6 +135,11 @@ class TestInvalidValues(unittest.TestCase):
 
     def test_zero_batch_size(self):
         self.assertConfigError({"BATCH_SIZE": "0"}, "BATCH_SIZE", ">= 1")
+
+    def test_max_pages_out_of_range(self):
+        self.assertConfigError({"SEARCH_MAX_PAGES": "0"}, "SEARCH_MAX_PAGES", ">= 1")
+        self.assertConfigError({"SEARCH_MAX_PAGES": "101"}, "SEARCH_MAX_PAGES", "<= 100")
+        self.assertConfigError({"SEARCH_MAX_PAGES": "two"}, "SEARCH_MAX_PAGES must be an integer")
 
     def test_min_delay_above_max(self):
         self.assertConfigError({"SCRAPE_MIN_DELAY": "5"}, "SCRAPE_MIN_DELAY", "SCRAPE_MAX_DELAY")

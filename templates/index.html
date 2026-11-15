@@ -144,6 +144,18 @@
                    onchange="this.form.submit()">
             Hide blacklisted
         </label>
+        <label title="Companies in config/aggregators.json (job boards, talent marketplaces, mass reposters)">
+            <input type="hidden" name="hide_aggregators" value="0">
+            <input type="checkbox" name="hide_aggregators" value="1" {% if hide_aggregators %}checked{% endif %}
+                   onchange="this.form.submit()">
+            Hide aggregators
+        </label>
+        <label title="Hides seniority: {{ above_levels|join(', ') }}. Unknown and Not Applicable are kept.">
+            <input type="hidden" name="hide_above_level" value="0">
+            <input type="checkbox" name="hide_above_level" value="1" {% if hide_above_level %}checked{% endif %}
+                   onchange="this.form.submit()">
+            Hide above my level
+        </label>
         <label>
             Per page:
             <select name="per_page" onchange="this.form.submit()">
@@ -165,6 +177,7 @@
                     {{ sort_th('company', 'Company') }}
                     {{ sort_th('location', 'Location') }}
                     {{ sort_th('date_time', 'Date', 'desc') }}
+                    <th>Seniority</th>
                     {{ sort_th('applicant_count', 'Applicants') }}
                     {{ sort_th('total_matches', 'Matches', 'desc') }}
                     {{ sort_th('weighted_score', 'Score', 'desc') }}
@@ -182,6 +195,7 @@
                     <td title="{{ job.company or '' }}">{{ job.company or "-" }}</td>
                     <td title="{{ job.location or '' }}">{{ job.location or "-" }}</td>
                     <td class="utc-time" data-utc="{{ job.date_time or '' }}">{{ job.date_time or "-" }}</td>
+                    <td>{{ job.seniority_level or "-" }}</td>
                     <td>{{ job.applicant_count if job.applicant_count is not none else "-" }}</td>
                     <td>{{ job.total_matches if job.total_matches is not none else "-" }}</td>
                     <td>{{ "%.1f"|format(job.weighted_score) if job.weighted_score is not none else "-" }}</td>

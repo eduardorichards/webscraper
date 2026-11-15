@@ -1,7 +1,8 @@
 """URL Builder for LinkedIn job searches"""
 
 from urllib.parse import quote_plus
-from config.settings import LINKEDIN_BASE_URL, TIME_POSTED_MAPPING, EXPERIENCE_LEVELS
+from config.settings import (
+    LINKEDIN_BASE_URL, LINKEDIN_SEE_MORE_URL, TIME_POSTED_MAPPING, EXPERIENCE_LEVELS)
 
 
 class LinkedInURLBuilder:
@@ -10,6 +11,26 @@ class LinkedInURLBuilder:
     @staticmethod
     def build_url(search_config):
         """Convert SearchConfig to LinkedIn URL"""
+        query_params = LinkedInURLBuilder._query_params(search_config)
+
+        # Build final URL
+        if query_params:
+            final_url = f"{LINKEDIN_BASE_URL}?{'&'.join(query_params)}"
+            print(f"🔗 Generated URL: {final_url}")
+            return final_url
+        else:
+            return LINKEDIN_BASE_URL
+
+    @staticmethod
+    def build_see_more_url(search_config, start):
+        """URL of the next result page ("See more jobs"), after `start` cards."""
+        query_params = LinkedInURLBuilder._query_params(search_config, verbose=False)
+        query_params.append(f"start={int(start)}")
+        return f"{LINKEDIN_SEE_MORE_URL}?{'&'.join(query_params)}"
+
+    @staticmethod
+    def _query_params(search_config, verbose=True):
+        """Search query parameters shared by the search page and see-more URLs."""
         query_params = []
         
         # Keywords - handle multiple words properly
@@ -38,7 +59,8 @@ class LinkedInURLBuilder:
                 if isinstance(level, int) and 1 <= level <= 6:
                     valid_levels.append(str(level))
                 else:
-                    print(f"⚠️  Warning: Invalid experience level {level}, skipping")
+                    if verbose:
+                        print(f"⚠️  Warning: Invalid experience level {level}, skipping")
             
             if valid_levels:
                 # Join multiple levels with commas and URL encode
@@ -47,18 +69,14 @@ class LinkedInURLBuilder:
                 query_params.append(f"f_E={encoded_experience}")
                 
                 # Debug info
-                level_names = [EXPERIENCE_LEVELS.get(int(level), f"Level {level}") for level in valid_levels]
-                print(f"🎯 Experience filter: {', '.join(level_names)} (codes: {experience_param})")
+                if verbose:
+                    level_names = [EXPERIENCE_LEVELS.get(int(level), f"Level {level}") for level in valid_levels]
+                    print(f"🎯 Experience filter: {', '.join(level_names)} (codes: {experience_param})")
         
         # Remote work
         if search_config.remote:
             query_params.append("f_WT=2")
-            print(f"🏠 Remote filter: enabled")
-        
-        # Build final URL
-        if query_params:
-            final_url = f"{LINKEDIN_BASE_URL}?{'&'.join(query_params)}"
-            print(f"🔗 Generated URL: {final_url}")
-            return final_url
-        else:
-            return LINKEDIN_BASE_URL
+            if verbose:
+                print(f"🏠 Remote filter: enabled")
+
+        return query_params

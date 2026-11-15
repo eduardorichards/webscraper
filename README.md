@@ -13,6 +13,12 @@ A Python application that scrapes job listings from LinkedIn based on configurab
 - Configurable time filters (24h, 1 week, 1 month)
 - Detects the application type (LinkedIn Easy Apply vs external) of each job; the web UI
   shows it in an "Apply" column and can filter by it (Easy Apply / External / Unknown)
+- Follows "See more jobs" result pages (up to `SEARCH_MAX_PAGES` per search)
+- Web UI filters, on by default: "Hide aggregators" (job boards, talent marketplaces, mass
+  reposters from `config/aggregators.json`) and "Hide above my level" (seniority above
+  `TARGET_SENIORITY_LEVELS`). Aggregator jobs are not detail-scraped at all.
+- Scores record the keyword config they were computed with (`scoring_version`);
+  `scripts/rescore_jobs.py` re-scores stored jobs without re-fetching
 
 ## Installation
 
@@ -73,7 +79,8 @@ the project root (see `.env.example`). Without a `.env`, the defaults below appl
 | `BATCH_PAUSE` | `30` | Pause (s) between batches |
 | `RETRY_DELAY` | `60` | Wait (s) before retrying after HTTP 429 |
 | `MAX_RETRIES` | `3` | Max retries per job on HTTP 429 |
-| `SEARCH_MIN_DELAY` / `SEARCH_MAX_DELAY` | `2` / `4` | Random delay (s) between search templates |
+| `SEARCH_MIN_DELAY` / `SEARCH_MAX_DELAY` | `2` / `4` | Random delay (s) between search templates and between result pages |
+| `SEARCH_MAX_PAGES` | `4` | Result pages per search template (1–100): first page + "See more jobs" pages |
 
 Relative `DB_PATH` / `LOG_DIR` resolve from the project root. Empty or unset variables use
 the default; invalid values raise `ConfigError` at startup. Real environment variables take
@@ -81,7 +88,40 @@ precedence over `.env`. `.env` is read by python-dotenv, bash `source` (`run_scr
 systemd `EnvironmentFile`, so keep it to plain `KEY=value` lines: no quotes, no inline comments,
 no `export`, no `$VAR` or `~`.
 
-Search templates, experience levels and keywords are domain config and stay in `config/`.
+Search templates, experience levels, target seniority levels, keywords and the aggregator list
+are domain config and stay in `config/`.
+
+### Pagination
+
+The search page shows up to 60 jobs. When it's full, the scraper requests the next pages from
+LinkedIn's guest "See more jobs" endpoint
+(`jobs-guest/jobs/api/seeMoreJobPostings/search?<same params>&start=<jobs so far>`, 10 jobs per
+page), with the `SEARCH_*_DELAY` delay before each page and the same 429 retries as detail
+pages (`RETRY_DELAY`, `MAX_RETRIES`). It stops at a short page, a page with only already-seen
+jobs, the template's `max_results`, or `SEARCH_MAX_PAGES`. Each page is saved as it arrives.
+`search_runs.pages_fetched` and `hit_page_limit` (1 = stopped at `SEARCH_MAX_PAGES` with more
+results left; a warning is logged) record what happened.
+
+### Seniority ("Hide above my level")
+
+LinkedIn no longer enforces the experience-level search filter (`f_E`), so many results are
+Mid-Senior. `TARGET_SENIORITY_LEVELS` in `config/settings.py` (default: Internship, Entry level,
+Associate) sets your levels; the web UI hides jobs whose `seniority_level` ranks above the
+highest of them (Internship < Entry level < Associate < Mid-Senior level < Director <
+Executive). Jobs with no seniority or "Not Applicable" are always shown. Nothing is deleted.
+
+### Aggregators
+
+`config/aggregators.json` lists companies that aren't the actual employer (job boards and
+feeds, AI-training/talent marketplaces, mass multi-country reposters), each with a `category`
+and `reason`. It's synced into the `aggregator_companies` table on every `SQLiteStorage()`
+init (added, updated and removed to match the file). Their jobs:
+- are hidden by the web UI's "Hide aggregators" filter (on by default), and
+- are not detail-scraped: the search hit is stored, but the job page is never fetched, so
+  they have no `job_posts` row and don't appear in the UI even with the filter off.
+  Each analysis logs `Skipped N detail fetches for aggregator companies`.
+
+This list is separate from the manual blacklist (`blacklisted_companies`, managed in the UI).
 
 ### Search Templates
 
@@ -127,17 +167,21 @@ SEARCH_TEMPLATES = [
 Job Scraper/
 ├── main.py                 # Main entry point
 ├── config/
+│   ├── env.py              # Environment config (env vars / .env)
 │   ├── settings.py         # Search templates and settings
-│   └── storage_setting.py  # Storage paths
+│   ├── keyword_settings.py # Keywords and weights
+│   └── aggregators.json    # Aggregator companies (category, reason)
 ├── scraper/
 │   ├── models/             # Data models (Job, SearchConfig)
 │   ├── core/               # Scraper and URL builder
 │   └── extractors/         # LinkedIn HTML parser
 ├── scripts/
-│   └── backfill_apply_type.py  # One-off apply_type backfill
+│   ├── backfill_apply_type.py  # One-off apply_type backfill
+│   └── rescore_jobs.py     # Re-score stored jobs with the current keywords
 ├── utils/
 │   ├── sqlite_storage.py   # SQLite database handler
-│   └── json_storage.py     # JSON file storage
+│   ├── aggregators.py      # Loads config/aggregators.json
+│   └── seniority.py        # "Above my level" rule
 └── data/
     └── database/           # SQLite database location
 ```
@@ -152,10 +196,11 @@ All timestamps are UTC ISO-8601 text with seconds and a `Z` suffix, e.g. `2026-1
 
 | Table | One row per | Main columns |
 |-------|-------------|--------------|
-| `search_runs` | search template execution | `template_name`, `keywords`, `location`, `started_at`, `finished_at`, `jobs_found`, `new_jobs`, `status` (`ok` / `error`), `error` |
+| `search_runs` | search template execution | `template_name`, `keywords`, `location`, `started_at`, `finished_at`, `jobs_found`, `new_jobs`, `status` (`ok` / `error`), `error`, `pages_fetched`, `hit_page_limit` |
 | `job_searches` | search result (a job found by a search; the same job can appear many times) | `linkedin_job_id`, `title`, `company`, `location`, `company_url`, `search_*`, `scraped_at`, `search_run_id` |
-| `job_posts` | job (details from the job page + keyword analysis) | `linkedin_job_id` (unique), `description`, `applicant_count`, `applicant_count_qualifier`, `apply_type`, `apply_url`, `date_time`, `scraped_at`, `weighted_score`, `matched_keywords`, ... |
+| `job_posts` | job (details from the job page + keyword analysis) | `linkedin_job_id` (unique), `description`, `applicant_count`, `applicant_count_qualifier`, `apply_type`, `apply_url`, `seniority_level`, `date_time`, `scraped_at`, `weighted_score`, `matched_keywords`, `scoring_version`, ... |
 | `blacklisted_companies` | company hidden in the web UI | `company`, `added_at` |
+| `aggregator_companies` | aggregator company (synced from `config/aggregators.json`) | `company`, `category`, `reason` |
 
 - `search_runs.new_jobs` counts jobs whose `linkedin_job_id` was not in `job_searches` before
   that run. A run with `status` NULL was interrupted before finishing.
@@ -168,13 +213,21 @@ All timestamps are UTC ISO-8601 text with seconds and a `Z` suffix, e.g. `2026-1
   marker on the page, or analyzed before this column existed; existing rows are not
   backfilled; see "Backfill apply_type" below). `apply_url` is meant for the external target, but logged-out job pages don't
   expose it, so it is currently always NULL and the UI shows "External" without a link.
+- `linkedin_job_id` is taken from the card's `data-entity-urn` (or the end of the
+  `/jobs/view/` URL) and must be exactly 10 digits; other cards are skipped and logged. Older
+  rows may contain junk IDs (shorter, or numbers taken from titles); they are kept.
+- `job_function` is NULL since ~2026-10-01: LinkedIn removed "Job function" from logged-out
+  job pages (they now list only seniority, employment type and industries).
+- `search_runs.pages_fetched` / `hit_page_limit` and `job_posts.scoring_version` are NULL on
+  rows written before they existed.
 - Closed jobs: LinkedIn redirects an expired job page to a search page
   (`trk=expired_jd_redirect`). The analysis then saves the job like a failed fetch (no
   description, `scraped_at` NULL, `apply_type` NULL) so it isn't analyzed again.
 
 Recent search runs:
 ```sql
-SELECT template_name, started_at, jobs_found, new_jobs, status, error
+SELECT template_name, started_at, jobs_found, new_jobs, pages_fetched, hit_page_limit,
+       status, error
 FROM search_runs ORDER BY id DESC LIMIT 24;
 ```
 
@@ -205,6 +258,23 @@ Configure keywords in `config/keyword_settings.py`:
 DEFAULT_KEYWORDS = ["Python", "Java", "Docker", ...]
 WEIGHTED_KEYWORDS = {"Python": 2.0, "Java": 2.5, ...}
 ```
+
+Each score stores `scoring_version`, a 12-character hash of the keyword list, their weights,
+case sensitivity and a scorer version (`SCORER_VERSION` in `scraper/models/keyword_config.py`,
+bumped when the matching logic changes). Scores with different versions aren't comparable.
+Failed or closed fetches have no version.
+
+### Re-score stored jobs
+
+After changing keywords or weights, re-score stored descriptions (no requests to LinkedIn):
+```bash
+python -m scripts.rescore_jobs --dry-run   # how many rows would change
+python -m scripts.rescore_jobs             # rows with an old or NULL scoring_version
+python -m scripts.rescore_jobs --all       # every row with a description
+```
+It updates only `total_matches`, `weighted_score`, `matched_keywords`, `match_percentage` and
+`scoring_version`, in batches of 500, and skips rows without a description. Re-running it is a
+no-op. ~100k rows take about 2–3 minutes.
 
 ## Backfill apply_type (one-off)
 `scripts/backfill_apply_type.py` re-fetches the job page of recently analyzed rows with
@@ -329,7 +399,7 @@ cd /home/edu/job-scraper && ./deploy.sh
 
 ## Known Limitations
 
-- Maximum ~60 jobs per search (LinkedIn pagination not yet implemented)
+- At most 60 + 10 × (`SEARCH_MAX_PAGES` − 1) jobs per search and run (90 by default)
 - Only extracts data visible on search results page (not full job descriptions)
 - No explicit rate limiting (use responsibly)
 

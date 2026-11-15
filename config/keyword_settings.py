@@ -23,8 +23,11 @@ DEFAULT_KEYWORDS = [
     "Testing", "Automation Testing", "QA", "Architecture", "JUnit", 
     "Mockito", "Agile", "Scrum", "SDLC", "JWT", "OAuth 2.0", "Full Stack", 
     "Site Reliability Engineer", "SRE", "API", "Restful", "Devops", "Claude", "OpenAI", "Gemini", "Cursor", "Anthropic", "Agentic", "Semi", "Ssr", "Semisenior",
+    "Software Developer",
 ]
 
+# Keys must match a DEFAULT_KEYWORDS entry exactly (case-sensitive): weights are
+# looked up by keyword, so any other key is silently ignored.
 # Strategic weights: Prioritizing Java, Testing frameworks, and Backend Architecture
 WEIGHTED_KEYWORDS = {
     "Java": 10,                # Your primary specialty
@@ -36,7 +39,7 @@ WEIGHTED_KEYWORDS = {
     "Ssr": 10,
     "Backend": 8,
     "Automated Testing": 3,   # High signal for your current studies
-    "Microservices": 4,       # High-value architecture keyword
+    "microservices": 4,       # High-value architecture keyword
     "PostgreSQL": 4,          # Specific DBs weigh more than "SQL"
     "Docker": 3,              # Essential for modern deployment
     "OAuth 2.0": 2,           # Shows security maturity

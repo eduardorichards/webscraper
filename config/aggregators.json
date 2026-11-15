@@ -1,0 +1,33 @@
+{
+  "_comment": "Companies that are not the actual employer, or mass reposters whose volume says nothing about hiring demand. Reviewed by hand from the top-volume companies (2026-04-06 to 2026-10-07). Matched by exact company name. Synced into the aggregator_companies table on every SQLiteStorage init. Real IT-services employers that repost a lot (BairesDev, EPAM, CI&T...) are not listed: deduplicating by (title, company) already absorbs their reposts.",
+  "categories": {
+    "job_board": "Job boards / feeds re-posting other companies' ads (company field is not the employer)",
+    "talent_marketplace": "AI-training / freelance talent marketplaces (gig work, not developer jobs per se)",
+    "mass_reposter": "Mass multi-country reposters (same title posted in ~100 locations)"
+  },
+  "companies": [
+    {"company": "Quik Hire Staffing", "category": "job_board", "reason": "job feed: 10k IDs for ~240 titles (43 IDs/title), almost no <25 applicants"},
+    {"company": "Hire Feed", "category": "job_board", "reason": "job feed: 22 IDs/title"},
+    {"company": "Hired", "category": "job_board", "reason": "job feed: 20 IDs/title"},
+    {"company": "Jobs Ai", "category": "job_board", "reason": "job feed: 10 IDs/title"},
+    {"company": "Jobgether", "category": "job_board", "reason": "aggregator marketplace (LinkedIn industry: Internet Marketplace Platforms)"},
+    {"company": "Jobbol", "category": "job_board", "reason": "aggregator: same titles across 156 locations"},
+    {"company": "innolevels", "category": "job_board", "reason": "aggregator (LinkedIn industry: Internet Publishing)"},
+    {"company": "Jobs via Dice", "category": "job_board", "reason": "job board"},
+    {"company": "BuscarVagas - Empregos Brasil", "category": "job_board", "reason": "job board"},
+    {"company": "elempleo", "category": "job_board", "reason": "job board"},
+    {"company": "Remote Jobs", "category": "job_board", "reason": "job board"},
+    {"company": "Lato Jobs", "category": "job_board", "reason": "job board"},
+    {"company": "Somewhere", "category": "job_board", "reason": "spam poster (job IDs embedded in titles)"},
+    {"company": "Alignerr", "category": "talent_marketplace", "reason": "AI-training gig marketplace; 18 IDs/title in 68 locations"},
+    {"company": "Mindrift", "category": "talent_marketplace", "reason": "AI-training gig marketplace; 46 IDs/title"},
+    {"company": "DataAnnotation", "category": "talent_marketplace", "reason": "AI-training gig marketplace"},
+    {"company": "Meridial Marketplace, by Invisible", "category": "talent_marketplace", "reason": "AI-training gig marketplace"},
+    {"company": "micro1", "category": "talent_marketplace", "reason": "AI talent marketplace"},
+    {"company": "Crossing Hurdles", "category": "talent_marketplace", "reason": "recruiter for AI-training gigs"},
+    {"company": "Turing", "category": "talent_marketplace", "reason": "freelance talent marketplace; 10 IDs/title"},
+    {"company": "TalentPop App", "category": "talent_marketplace", "reason": "talent marketplace; 16 IDs/title"},
+    {"company": "FullStack", "category": "mass_reposter", "reason": "mass reposter: 28 IDs/title across 111 locations"},
+    {"company": "Bluelight", "category": "mass_reposter", "reason": "mass reposter: 34 IDs/title across 99 locations"}
+  ]
+}

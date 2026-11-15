@@ -98,10 +98,16 @@ class TestMigrations(unittest.TestCase):
         self.assertIn('applicant_count_qualifier', self._columns('job_posts'))
         self.assertIn('apply_type', self._columns('job_posts'))
         self.assertIn('apply_url', self._columns('job_posts'))
+        self.assertIn('scoring_version', self._columns('job_posts'))
         self.assertEqual(
             self._columns('search_runs'),
             ['id', 'template_name', 'keywords', 'location', 'started_at',
-             'finished_at', 'jobs_found', 'new_jobs', 'status', 'error'])
+             'finished_at', 'jobs_found', 'new_jobs', 'status', 'error',
+             'pages_fetched', 'hit_page_limit'])
+        self.assertEqual(self._columns('aggregator_companies'),
+                         ['company', 'category', 'reason'])
+        self.assertGreater(
+            self._query("SELECT COUNT(*) FROM aggregator_companies")[0][0], 0)
         indexes = {r[0] for r in self._query(
             "SELECT name FROM sqlite_master WHERE type = 'index'")}
         self.assertIn('idx_job_searches_run', indexes)
@@ -130,6 +136,8 @@ class TestMigrations(unittest.TestCase):
         self.assertEqual(self._query(
             "SELECT COUNT(*) FROM job_posts"
             " WHERE apply_type IS NOT NULL OR apply_url IS NOT NULL")[0][0], 0)
+        self.assertEqual(self._query(
+            "SELECT COUNT(*) FROM job_posts WHERE scoring_version IS NOT NULL")[0][0], 0)
         # Other data untouched
         self.assertEqual(
             self._query("SELECT date_time, weighted_score FROM job_posts"
@@ -155,6 +163,31 @@ class TestMigrations(unittest.TestCase):
         self.assertEqual(
             self._query("SELECT * FROM job_posts ORDER BY linkedin_job_id"), snapshot)
         self.assertEqual(self._query("SELECT COUNT(*) FROM job_searches")[0][0], 4)
+        self.assertEqual(
+            self._query("SELECT COUNT(*) FROM aggregator_companies")[0][0],
+            self._query("SELECT COUNT(DISTINCT company) FROM aggregator_companies")[0][0])
+
+    def test_search_runs_without_pagination_columns(self):
+        # search_runs as created before pagination: rows keep NULL pages
+        conn = sqlite3.connect(self.db_path)
+        conn.executescript(LEGACY_SCHEMA)
+        conn.execute("""
+            CREATE TABLE search_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, template_name TEXT,
+                keywords TEXT, location TEXT, started_at TEXT, finished_at TEXT,
+                jobs_found INTEGER, new_jobs INTEGER,
+                status TEXT CHECK (status IN ('ok', 'error')), error TEXT)""")
+        conn.execute("INSERT INTO search_runs (template_name, jobs_found, status)"
+                     " VALUES ('Java', 60, 'ok')")
+        conn.commit()
+        conn.close()
+        self._open_storage()
+        self._open_storage()
+        self._assert_migrated_schema()
+        self.assertEqual(
+            self._query("SELECT template_name, jobs_found, status, pages_fetched,"
+                        " hit_page_limit FROM search_runs"),
+            [('Java', 60, 'ok', None, None)])
 
     def test_data_fix_does_not_touch_exact_201_saved_after_migration(self):
         self._create_legacy_db()
@@ -182,6 +215,7 @@ class TestMigrations(unittest.TestCase):
         job = storage.get_job_summary(days=None, unique=True, per_page=None)[0]
         self.assertIn('apply_type', job)
         self.assertIn('apply_url', job)
+        self.assertIn('seniority_level', job)
 
 
 if __name__ == '__main__':

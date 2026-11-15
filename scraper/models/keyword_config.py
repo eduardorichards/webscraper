@@ -1,4 +1,11 @@
 """Configuration for keyword matching in job descriptions."""
+import hashlib
+import json
+
+# Bump when the matching/scoring logic changes (KeywordAnalyzer.analyze,
+# MatchResult.calculate_score), so scores made by the old logic get a new
+# scoring_version even with the same keywords.
+SCORER_VERSION = 1
 
 
 class KeywordConfig:
@@ -29,6 +36,20 @@ class KeywordConfig:
             'weights': self.weights,
             'case_sensitive': self.case_sensitive
         }
+
+    def scoring_version(self):
+        """Short hash identifying how scores are computed with this config.
+
+        Covers what changes a score: the keyword set, each keyword's weight,
+        case sensitivity and SCORER_VERSION. Keyword order and weights for
+        keywords not in the list don't affect scores, so they're left out.
+        """
+        canonical = json.dumps({
+            'scorer': SCORER_VERSION,
+            'case_sensitive': bool(self.case_sensitive),
+            'weights': {kw: float(self.weights.get(kw, 1.0)) for kw in self.keywords},
+        }, sort_keys=True, separators=(',', ':'))
+        return hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:12]
 
     def get_keywords_string(self):
         """Get comma-separated keywords string for storage."""

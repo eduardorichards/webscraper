@@ -4,18 +4,23 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from config.env import DB_PATH
+from config.settings import TARGET_SENIORITY_LEVELS
+from utils.aggregators import load_aggregators
+from utils.seniority import levels_above
 from utils.time_utils import utc_now_iso
 
 LINKEDIN_JOB_BASE_URL = "https://www.linkedin.com/jobs/view/"
 
 
 class SQLiteStorage:
-    def __init__(self, db_file=None):
+    def __init__(self, db_file=None, aggregators_file=None):
         if db_file is None:
             DB_PATH.parent.mkdir(parents=True, exist_ok=True)
             db_file = DB_PATH
 
         self.db_file = Path(db_file)
+        # None = config/aggregators.json
+        self.aggregators_file = aggregators_file
         self._ensure_db_exists()
 
     def _ensure_db_exists(self):
@@ -107,6 +112,16 @@ class SQLiteStorage:
         )
         """)
 
+        # Table 5: Aggregator / job-board companies, synced from
+        # config/aggregators.json below. Separate from the manual blacklist.
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS aggregator_companies (
+            company TEXT PRIMARY KEY,
+            category TEXT NOT NULL,
+            reason TEXT
+        )
+        """)
+
         # Migrations: columns added after the first release. Existing rows
         # keep NULL (ADD COLUMN does not rewrite the table).
         self._add_column_if_missing(cursor, 'job_searches', 'scraped_at', 'TEXT')
@@ -127,6 +142,15 @@ class SQLiteStorage:
         # 'easy_apply' | 'external' | NULL (unknown); apply_url only for external
         self._add_column_if_missing(cursor, 'job_posts', 'apply_type', 'TEXT')
         self._add_column_if_missing(cursor, 'job_posts', 'apply_url', 'TEXT')
+        # Hash of the keyword config that produced the score; NULL = unknown
+        # (scored before versioning) or nothing scored (failed/closed fetch)
+        self._add_column_if_missing(cursor, 'job_posts', 'scoring_version', 'TEXT')
+        # Result pages fetched; 1 if the run stopped at SEARCH_MAX_PAGES with
+        # more results left. NULL on runs before pagination.
+        self._add_column_if_missing(cursor, 'search_runs', 'pages_fetched', 'INTEGER')
+        self._add_column_if_missing(cursor, 'search_runs', 'hit_page_limit', 'INTEGER')
+
+        self._sync_aggregators(cursor)
 
         # Indexes
         cursor.execute("""
@@ -162,7 +186,8 @@ class SQLiteStorage:
             jp.total_matches,
             jp.matched_keywords,
             jp.apply_type,
-            jp.apply_url
+            jp.apply_url,
+            jp.seniority_level
         FROM job_posts jp
         INNER JOIN job_searches js ON js.linkedin_job_id = jp.linkedin_job_id
         GROUP BY jp.linkedin_job_id
@@ -175,7 +200,8 @@ class SQLiteStorage:
         CREATE VIEW job_summary_unique AS
         SELECT linkedin_job_id, title, company, location, date_time,
                applicant_count, weighted_score, match_percentage,
-               total_matches, matched_keywords, apply_type, apply_url
+               total_matches, matched_keywords, apply_type, apply_url,
+               seniority_level
         FROM (
             SELECT *,
                 ROW_NUMBER() OVER (
@@ -189,6 +215,37 @@ class SQLiteStorage:
         WHERE row_num <= 2
         ORDER BY weighted_score DESC
         """)
+
+    def _sync_aggregators(self, cursor):
+        """Make aggregator_companies match the data file (idempotent).
+
+        Inserts new companies, updates changed category/reason, and deletes
+        companies no longer listed. Unchanged rows aren't written.
+        """
+        entries = load_aggregators(self.aggregators_file)
+        for company, category, reason in entries:
+            cursor.execute(
+                "INSERT OR IGNORE INTO aggregator_companies (company, category, reason)"
+                " VALUES (?, ?, ?)", (company, category, reason))
+            cursor.execute(
+                "UPDATE aggregator_companies SET category = ?, reason = ?"
+                " WHERE company = ? AND (category IS NOT ? OR reason IS NOT ?)",
+                (category, reason, company, category, reason))
+        companies = [company for company, _, _ in entries]
+        placeholders = ", ".join("?" * len(companies))
+        cursor.execute(
+            f"DELETE FROM aggregator_companies WHERE company NOT IN ({placeholders})",
+            companies)
+
+    def get_aggregator_companies(self):
+        """Return [{'company', 'category', 'reason'}] sorted by company."""
+        conn = sqlite3.connect(self.db_file)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT company, category, reason FROM aggregator_companies"
+            " ORDER BY company ASC").fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
 
     def start_search_run(self, template_name, keywords, location):
         """Insert a search_runs row for a template execution; return its id.
@@ -207,14 +264,19 @@ class SQLiteStorage:
         conn.close()
         return run_id
 
-    def finish_search_run(self, run_id, jobs_found, new_jobs, status, error=None):
+    def finish_search_run(self, run_id, jobs_found, new_jobs, status, error=None,
+                          pages_fetched=None, hit_page_limit=None):
         """Record the outcome of a search run ('ok' or 'error')."""
+        if hit_page_limit is not None:
+            hit_page_limit = int(bool(hit_page_limit))
         conn = sqlite3.connect(self.db_file)
         conn.execute("""
             UPDATE search_runs
-            SET finished_at = ?, jobs_found = ?, new_jobs = ?, status = ?, error = ?
+            SET finished_at = ?, jobs_found = ?, new_jobs = ?, status = ?, error = ?,
+                pages_fetched = ?, hit_page_limit = ?
             WHERE id = ?
-        """, (utc_now_iso(), jobs_found, new_jobs, status, error, run_id))
+        """, (utc_now_iso(), jobs_found, new_jobs, status, error,
+              pages_fetched, hit_page_limit, run_id))
         conn.commit()
         conn.close()
 
@@ -324,36 +386,67 @@ class SQLiteStorage:
             'file_path': self.db_file
         }
 
-    def get_jobs_without_analysis(self):
+    # Candidate jobs for detail scraping: max 2 IDs per (title, company),
+    # the first ones seen, without a job_posts row yet
+    _PENDING_JOBS_SQL = """
+        WITH unique_jobs AS (
+            SELECT linkedin_job_id, title, company,
+                ROW_NUMBER() OVER (
+                    PARTITION BY title, company
+                    ORDER BY id ASC
+                ) as row_num
+            FROM job_searches
+            GROUP BY linkedin_job_id
+        )
+        SELECT uj.linkedin_job_id, uj.title, uj.company
+        FROM unique_jobs uj
+        LEFT JOIN job_posts jp ON uj.linkedin_job_id = jp.linkedin_job_id
+        WHERE uj.row_num <= 2
+          AND jp.linkedin_job_id IS NULL
+    """
+    _AGGREGATOR_CLAUSE = "uj.company IN (SELECT company FROM aggregator_companies)"
+
+    def get_jobs_without_analysis(self, exclude_aggregators=True):
         """
         Get distinct linkedin_job_ids that haven't been analyzed yet.
         Returns max 2 per (title, company) pair to avoid analyzing excessive duplicates.
+
+        With exclude_aggregators (default), jobs from aggregator_companies are
+        left out: their search hits are kept but their pages aren't fetched.
         """
         conn = sqlite3.connect(self.db_file)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
-        cursor.execute("""
-            WITH unique_jobs AS (
-                SELECT linkedin_job_id, title, company,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY title, company
-                        ORDER BY id ASC
-                    ) as row_num
-                FROM job_searches
-                GROUP BY linkedin_job_id
-            )
-            SELECT uj.linkedin_job_id, uj.title, uj.company
-            FROM unique_jobs uj
-            LEFT JOIN job_posts jp ON uj.linkedin_job_id = jp.linkedin_job_id
-            WHERE uj.row_num <= 2
-              AND jp.linkedin_job_id IS NULL
-            ORDER BY uj.linkedin_job_id ASC
-        """)
+        query = self._PENDING_JOBS_SQL
+        if exclude_aggregators:
+            query += f" AND NOT {self._AGGREGATOR_CLAUSE}"
+        cursor.execute(query + " ORDER BY uj.linkedin_job_id ASC")
 
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
+
+    def count_skipped_aggregator_jobs(self, since=None):
+        """Count unanalyzed aggregator jobs that get_jobs_without_analysis()
+        leaves out, i.e. detail fetches skipped.
+
+        since: UTC ISO timestamp; only jobs first seen in a search at or
+        after it (None = all pending, including rows without scraped_at).
+        """
+        query = f"SELECT COUNT(*) FROM ({self._PENDING_JOBS_SQL} AND {self._AGGREGATOR_CLAUSE}"
+        params = []
+        if since is not None:
+            # First seen at or after `since`: no earlier (or undated) hit
+            query += (" AND NOT EXISTS (SELECT 1 FROM job_searches js"
+                      " WHERE js.linkedin_job_id = uj.linkedin_job_id"
+                      " AND (js.scraped_at IS NULL OR js.scraped_at < ?))")
+            params.append(since)
+        query += ")"
+        conn = sqlite3.connect(self.db_file)
+        count = conn.execute(query, params).fetchone()[0]
+        conn.close()
+        return count
 
     def save_job_analysis(self, match_result):
         """Save or update job post analysis results."""
@@ -367,8 +460,9 @@ class SQLiteStorage:
                 linkedin_job_id, description, applicant_count, date_time,
                 total_matches, weighted_score, matched_keywords, match_percentage,
                 employment_type, job_function, seniority_level, industries,
-                applicant_count_qualifier, scraped_at, apply_type, apply_url
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                applicant_count_qualifier, scraped_at, apply_type, apply_url,
+                scoring_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             match_result.linkedin_job_id,
             match_result.description,
@@ -386,6 +480,7 @@ class SQLiteStorage:
             match_result.scraped_at,
             match_result.apply_type,
             match_result.apply_url,
+            match_result.scoring_version,
         ))
 
         conn.commit()
@@ -475,10 +570,13 @@ class SQLiteStorage:
     DEFAULT_DIRECTION = 'desc'
     # Application type filter values; 'unknown' matches NULL
     APPLY_FILTERS = ('easy_apply', 'external', 'unknown')
+    # seniority_level values hidden by hide_above_level (from config.settings)
+    ABOVE_TARGET_LEVELS = levels_above(TARGET_SENIORITY_LEVELS)
 
     def _build_summary_filters(self, min_score=0, days=None, location=None,
                                hours=None, hide_blacklisted=False,
-                               apply_type=None):
+                               apply_type=None, hide_aggregators=False,
+                               hide_above_level=False):
         """Build the WHERE clause and bound params shared by summary queries."""
         clauses = ["weighted_score >= ?"]
         params = [min_score]
@@ -507,12 +605,26 @@ class SQLiteStorage:
             clauses.append("apply_type = ?")
             params.append(apply_type)
 
+        if hide_aggregators:
+            clauses.append(
+                "(company IS NULL OR company NOT IN "
+                "(SELECT company FROM aggregator_companies))"
+            )
+
+        # NULL and unranked values ("Not Applicable") are always kept
+        if hide_above_level and self.ABOVE_TARGET_LEVELS:
+            placeholders = ", ".join("?" * len(self.ABOVE_TARGET_LEVELS))
+            clauses.append(
+                f"(seniority_level IS NULL OR seniority_level NOT IN ({placeholders}))")
+            params.extend(self.ABOVE_TARGET_LEVELS)
+
         return " WHERE " + " AND ".join(clauses), params
 
     def get_job_summary(self, min_score=0, limit=None, unique=False, days=7,
                         page=1, per_page=50, location=None, hours=None,
                         hide_blacklisted=False, sort=DEFAULT_SORT,
-                        direction=DEFAULT_DIRECTION, apply_type=None):
+                        direction=DEFAULT_DIRECTION, apply_type=None,
+                        hide_aggregators=False, hide_above_level=False):
         """Get one page of the job summary view.
 
         per_page=None disables pagination (all matching rows, or `limit`).
@@ -524,7 +636,8 @@ class SQLiteStorage:
 
         view_name = "job_summary_unique" if unique else "job_summary"
         where, params = self._build_summary_filters(
-            min_score, days, location, hours, hide_blacklisted, apply_type)
+            min_score, days, location, hours, hide_blacklisted, apply_type,
+            hide_aggregators, hide_above_level)
 
         if sort not in self.SORT_COLUMNS or direction not in self.SORT_DIRECTIONS:
             sort, direction = self.DEFAULT_SORT, self.DEFAULT_DIRECTION
@@ -552,14 +665,16 @@ class SQLiteStorage:
 
     def count_job_summary(self, min_score=0, unique=False, days=7,
                           location=None, hours=None, hide_blacklisted=False,
-                          apply_type=None):
+                          apply_type=None, hide_aggregators=False,
+                          hide_above_level=False):
         """Count rows of the job summary view matching the given filters."""
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
 
         view_name = "job_summary_unique" if unique else "job_summary"
         where, params = self._build_summary_filters(
-            min_score, days, location, hours, hide_blacklisted, apply_type)
+            min_score, days, location, hours, hide_blacklisted, apply_type,
+            hide_aggregators, hide_above_level)
 
         cursor.execute(f"SELECT COUNT(*) FROM {view_name}{where}", params)
         total = cursor.fetchone()[0]
@@ -585,7 +700,7 @@ class SQLiteStorage:
             'linkedin_job_id', 'title', 'company', 'location',
             'date_time', 'applicant_count', 'weighted_score',
             'match_percentage', 'total_matches', 'matched_keywords',
-            'apply_type', 'apply_url'
+            'apply_type', 'apply_url', 'seniority_level'
         ]
 
         with open(filepath, 'w', newline='', encoding='utf-8') as f:

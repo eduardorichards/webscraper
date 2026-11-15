@@ -23,6 +23,15 @@ def _int_arg(name, default, min_value=None, max_value=None):
     return value
 
 
+def _checkbox_arg(name, default=True):
+    """Read a checkbox paired with a hidden "0" input: the last value wins.
+
+    Absent entirely (first visit) → default.
+    """
+    values = request.args.getlist(name)
+    return values[-1] == "1" if values else default
+
+
 @app.template_global()
 def index_url(query_args, **overrides):
     """URL for the index page keeping current params, with some overridden."""
@@ -54,10 +63,9 @@ def index():
     if apply_raw not in SQLiteStorage.APPLY_FILTERS:
         apply_raw = ""
 
-    # Checkbox is paired with a hidden "0" input, so the last value wins;
-    # absent entirely (first visit) → hide by default.
-    hide_values = request.args.getlist("hide_blacklisted")
-    hide_blacklisted = hide_values[-1] == "1" if hide_values else True
+    hide_blacklisted = _checkbox_arg("hide_blacklisted")
+    hide_aggregators = _checkbox_arg("hide_aggregators")
+    hide_above_level = _checkbox_arg("hide_above_level")
 
     sort = request.args.get("sort", SQLiteStorage.DEFAULT_SORT)
     direction = request.args.get("dir", SQLiteStorage.DEFAULT_DIRECTION)
@@ -67,7 +75,9 @@ def index():
     filters = dict(min_score=min_score, unique=True, days=days,
                    location=location or None, hours=hours,
                    hide_blacklisted=hide_blacklisted,
-                   apply_type=apply_raw or None)
+                   apply_type=apply_raw or None,
+                   hide_aggregators=hide_aggregators,
+                   hide_above_level=hide_above_level)
 
     storage = SQLiteStorage()
     total = storage.count_job_summary(**filters)
@@ -88,6 +98,8 @@ def index():
         "location": location,
         "hours": hours if hours is not None else "",
         "hide_blacklisted": "1" if hide_blacklisted else "0",
+        "hide_aggregators": "1" if hide_aggregators else "0",
+        "hide_above_level": "1" if hide_above_level else "0",
         "apply": apply_raw,
         "per_page": per_page,
         "sort": sort,
@@ -99,6 +111,9 @@ def index():
                            min_score=min_score, blacklisted=blacklisted,
                            days=days_raw, location=location, hours=hours,
                            hide_blacklisted=hide_blacklisted, apply=apply_raw,
+                           hide_aggregators=hide_aggregators,
+                           hide_above_level=hide_above_level,
+                           above_levels=SQLiteStorage.ABOVE_TARGET_LEVELS,
                            per_page=per_page, per_page_options=PER_PAGE_OPTIONS,
                            sort=sort, direction=direction,
                            page=page, total=total, total_pages=total_pages,

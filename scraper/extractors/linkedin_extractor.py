@@ -2,27 +2,57 @@
 
 from ..models.job import Job
 from urllib.parse import urlparse, urlunparse
+import logging
 import re
+
+logger = logging.getLogger(__name__)
+
+# LinkedIn job IDs are 10 digits (~4.4 billion in Nov 2026, growing ~13M/month)
+VALID_JOB_ID = re.compile(r'[0-9]{10}')
+_URN_ID = re.compile(r'^urn:li:jobPosting:(\d+)$')
+# Last digit run of the /jobs/view/ path segment: "/jobs/view/<slug>-<id>" or
+# "/jobs/view/<id>". Slugs can contain numbers from the title, so never take
+# the first one.
+_URL_ID = re.compile(r'/jobs/view/(?:[^/?#]*?-)?(\d+)/?(?:[?#]|$)')
+
+
+def is_valid_job_id(job_id):
+    """True if job_id looks like a real LinkedIn job ID (exactly 10 digits)."""
+    return bool(job_id) and bool(VALID_JOB_ID.fullmatch(job_id))
 
 
 class LinkedInExtractor:
     """Extract job data from LinkedIn pages"""
 
+    def __init__(self):
+        self.last_card_count = 0  # Cards on the page passed to the last extract_jobs()
+
     def extract_jobs(self, soup, max_results=10):
-        """Extract jobs from LinkedIn search results"""
+        """Extract jobs from LinkedIn search results.
+
+        Cards without a valid job ID are skipped and logged. The number of
+        cards on the page (valid or not) is kept in self.last_card_count.
+        """
         print(f"\n🎯 EXTRACTING LINKEDIN JOBS")
         print("="*50)
 
         # Find job cards
         job_cards = soup.find_all('div', class_='job-search-card')
+        self.last_card_count = len(job_cards)
         print(f"Found {len(job_cards)} job cards")
 
         jobs = []
 
         for i, card in enumerate(job_cards[:max_results]):
             job_data = self._extract_single_job(card)
-            if job_data:
-                jobs.append(Job(**job_data))
+            if not is_valid_job_id(job_data.get('linkedin_job_id')):
+                logger.warning(
+                    "Skipping job card without a valid 10-digit job ID: "
+                    "id=%r title=%r href=%r",
+                    job_data.get('linkedin_job_id'), job_data.get('title'),
+                    self._job_href(card))
+                continue
+            jobs.append(Job(**job_data))
 
         return jobs
 
@@ -80,37 +110,38 @@ class LinkedInExtractor:
         return clean_url
 
     def _extract_linkedin_job_id(self, card):
-        """Extract LinkedIn job ID from job card.
+        """Extract the LinkedIn job ID from a job card.
+
+        Uses the card's data-entity-urn ("urn:li:jobPosting:<id>"), falling
+        back to the /jobs/view/ link. Never parsed from the title.
 
         Returns:
-            str: LinkedIn job ID or None
+            str: job ID (not yet validated) or None
         """
-        title_link = card.find('a', class_='job-card-container__link')
-        if title_link:
-            href = title_link.get('href')
-            if href:
-                job_id = self._extract_id_from_url(href)
-                if job_id:
-                    return job_id
+        match = _URN_ID.match(card.get('data-entity-urn') or '')
+        if match:
+            return match.group(1)
 
-        # Fallback: Look for any link containing '/jobs/view/'
-        all_links = card.find_all('a')
-        for link in all_links:
-            href = link.get('href', '')
-            if '/jobs/view/' in href:
-                job_id = self._extract_id_from_url(href)
-                if job_id:
-                    return job_id
+        href = self._job_href(card)
+        if href:
+            return self._extract_id_from_url(href)
+        return None
 
+    @staticmethod
+    def _job_href(card):
+        """href of the card's first /jobs/view/ link, or None."""
+        for link in card.find_all('a', href=True):
+            if '/jobs/view/' in link['href']:
+                return link['href']
         return None
 
     def _extract_id_from_url(self, href):
-        """Extract job ID from a LinkedIn URL.
+        """Extract the job ID from a LinkedIn job URL (the path's last number).
 
         Returns:
             str: job ID or None
         """
-        match = re.search(r'/jobs/view/[^/]*?(\d{5,})', href)
+        match = _URL_ID.search(href)
         if match:
             return match.group(1)
         return None

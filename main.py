@@ -12,6 +12,7 @@ from scraper import JobScraper, SearchConfig
 from scraper.models.keyword_config import KeywordConfig
 from scraper.core.keyword_matcher import KeywordMatcher
 from utils.sqlite_storage import SQLiteStorage
+from utils.time_utils import utc_now_iso
 
 
 def setup_logging():
@@ -69,25 +70,30 @@ def multiple_search(templates=None, scraper=None):
 
         run_id = storage.start_search_run(
             search_name, params.get("keywords"), params.get("location"))
-        jobs = []
         try:
             search_config = SearchConfig(**params)
-            jobs = scraper.search_jobs(
+            scraper.search_jobs(
                 search_config, save_results=True,
                 search_run_id=run_id, raise_errors=True)
         except Exception as e:
             logger.error(f"Search '{search_name}' failed: {e}")
+            # Pages saved before the failure stay in job_searches
             storage.finish_search_run(
-                run_id, jobs_found=len(jobs), new_jobs=0,
-                status='error', error=str(e) or type(e).__name__)
+                run_id, jobs_found=scraper.last_jobs_found,
+                new_jobs=scraper.last_new_jobs,
+                status='error', error=str(e) or type(e).__name__,
+                pages_fetched=scraper.last_pages_fetched,
+                hit_page_limit=scraper.last_hit_page_limit)
         else:
-            total_jobs_found += len(jobs)
+            total_jobs_found += scraper.last_jobs_found
             storage.finish_search_run(
-                run_id, jobs_found=len(jobs), new_jobs=scraper.last_new_jobs,
-                status='ok')
+                run_id, jobs_found=scraper.last_jobs_found,
+                new_jobs=scraper.last_new_jobs, status='ok',
+                pages_fetched=scraper.last_pages_fetched,
+                hit_page_limit=scraper.last_hit_page_limit)
             logger.info(
-                f"Found {len(jobs)} jobs ({scraper.last_new_jobs} new) "
-                f"in search '{search_name}'")
+                f"Found {scraper.last_jobs_found} jobs ({scraper.last_new_jobs} new) "
+                f"in {scraper.last_pages_fetched} page(s) in search '{search_name}'")
 
         # Random delay between searches to avoid rate limiting
         if i < len(templates):
@@ -108,15 +114,20 @@ def multiple_search(templates=None, scraper=None):
         )
 
 
-def analyze_keywords(keywords=None, weights=None, skip_analyzed=True, top_n=20):
+def analyze_keywords(keywords=None, weights=None, skip_analyzed=True, top_n=20,
+                     since=None):
     """
     Analyze stored jobs for keyword matches.
+
+    Jobs from aggregator companies are not fetched (see KeywordMatcher).
 
     Args:
         keywords: List of keywords to search for (uses defaults if None)
         weights: Optional dict of keyword weights
         skip_analyzed: Skip jobs already analyzed with these keywords
         top_n: Number of top results to display
+        since: UTC ISO timestamp; the skipped aggregator fetches logged are
+            those first seen at or after it (default: all pending ones)
     """
     from config.keyword_settings import DEFAULT_KEYWORDS, WEIGHTED_KEYWORDS
 
@@ -142,7 +153,7 @@ def analyze_keywords(keywords=None, weights=None, skip_analyzed=True, top_n=20):
     matcher = KeywordMatcher(storage, keyword_config)
 
     # Run analysis
-    results = matcher.analyze_jobs(skip_analyzed=skip_analyzed)
+    results = matcher.analyze_jobs(skip_analyzed=skip_analyzed, since=since)
 
     # Display results
     if results:
@@ -166,11 +177,13 @@ if __name__ == "__main__":
     logger = logging.getLogger()
 
     try:
+        run_started_at = utc_now_iso()
+
         # Run batch job search
         multiple_search()
 
         # Analyze existing jobs for keywords
-        analyze_keywords()
+        analyze_keywords(since=run_started_at)
     except Exception:
         logger.exception("Scraper failed with an error")
         raise

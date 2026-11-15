@@ -134,9 +134,12 @@ def load_settings(environ):
         "BATCH_PAUSE": _float(environ, "BATCH_PAUSE", 30, min_value=0),
         "RETRY_DELAY": _float(environ, "RETRY_DELAY", 60, min_value=0),
         "MAX_RETRIES": _int(environ, "MAX_RETRIES", 3, min_value=0),
-        # Delay between search templates
+        # Delay between search templates and between result pages
         "SEARCH_MIN_DELAY": search_min,
         "SEARCH_MAX_DELAY": search_max,
+        # Result pages fetched per search template (first page + "See more jobs")
+        "SEARCH_MAX_PAGES": _int(environ, "SEARCH_MAX_PAGES", 4,
+                                 min_value=1, max_value=100),
     }
 
 
@@ -172,3 +175,4 @@ RETRY_DELAY = _settings["RETRY_DELAY"]
 MAX_RETRIES = _settings["MAX_RETRIES"]
 SEARCH_MIN_DELAY = _settings["SEARCH_MIN_DELAY"]
 SEARCH_MAX_DELAY = _settings["SEARCH_MAX_DELAY"]
+SEARCH_MAX_PAGES = _settings["SEARCH_MAX_PAGES"]

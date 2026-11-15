@@ -31,6 +31,8 @@ class MatchResult:
         self.weighted_score = 0.0
         self.matched_keywords = []  # Keywords found at least once
         self.match_percentage = 0.0
+        # KeywordConfig.scoring_version() of the score; None if nothing was scored
+        self.scoring_version = None
 
     @property
     def job_url(self):
@@ -53,6 +55,7 @@ class MatchResult:
             count * keyword_config.weights.get(kw, 1.0)
             for kw, count in self.keyword_matches.items()
         )
+        self.scoring_version = keyword_config.scoring_version()
 
     def to_dict(self):
         """Convert result to dictionary for storage."""
@@ -73,6 +76,7 @@ class MatchResult:
             'job_function': self.job_function,
             'seniority_level': self.seniority_level,
             'industries': self.industries,
+            'scoring_version': self.scoring_version,
         }
 
     def __repr__(self):
