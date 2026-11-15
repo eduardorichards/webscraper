@@ -111,6 +111,10 @@ class TestMigrations(unittest.TestCase):
         indexes = {r[0] for r in self._query(
             "SELECT name FROM sqlite_master WHERE type = 'index'")}
         self.assertIn('idx_job_searches_run', indexes)
+        self.assertIn('idx_job_posts_employment_type', indexes)
+        self.assertEqual(self._columns('applications'),
+                         ['linkedin_job_id', 'applied_on', 'notes', 'created_at',
+                          'updated_at'])
 
     def test_fresh_db_init_twice(self):
         self._open_storage()
@@ -205,6 +209,13 @@ class TestMigrations(unittest.TestCase):
                         " FROM job_posts WHERE linkedin_job_id = '400'"),
             [(201, None)])
 
+    def test_applications_survive_reinit(self):
+        storage = self._open_storage()
+        storage.save_application('100', '2026-11-10', 'notes')
+        snapshot = self._query("SELECT * FROM applications")
+        self._open_storage()
+        self.assertEqual(self._query("SELECT * FROM applications"), snapshot)
+
     def test_views_still_work_after_migration(self):
         self._create_legacy_db()
         storage = self._open_storage()
@@ -216,6 +227,8 @@ class TestMigrations(unittest.TestCase):
         self.assertIn('apply_type', job)
         self.assertIn('apply_url', job)
         self.assertIn('seniority_level', job)
+        self.assertIn('employment_type', job)
+        self.assertIn('applicant_count_qualifier', job)
 
 
 if __name__ == '__main__':

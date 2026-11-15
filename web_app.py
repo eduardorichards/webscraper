@@ -1,13 +1,30 @@
 import math
+import re
+from datetime import date, datetime
 
 from flask import Flask, render_template, request, jsonify, url_for
 from config import env
+from config.keyword_settings import DEFAULT_KEYWORDS
 from utils.sqlite_storage import SQLiteStorage
 
 app = Flask(__name__)
 
 DAYS_OPTIONS = {"7", "14", "30", "all"}
+DAYS_LABELS = {"7": "Last 7 days", "14": "Last 14 days", "30": "Last 30 days",
+               "all": "All time"}
 PER_PAGE_OPTIONS = list(env.PER_PAGE_CHOICES)
+APPLY_LABELS = {"easy_apply": "Easy Apply", "external": "External", "unknown": "Unknown"}
+APPLIED_LABELS = {"hide": "Hide applied", "only": "Only applied", "all": "All"}
+DEFAULT_APPLIED = "hide"
+# Keyword filter options: the configured keywords, in config order
+KEYWORD_OPTIONS = list(dict.fromkeys(DEFAULT_KEYWORDS))
+MAX_SEARCH_LENGTH = 100
+MAX_LIST_VALUES = 20
+MAX_NOTES_LENGTH = 2000
+# (min score, badge class), highest first; below the last one → "low".
+# From the score distribution of ~100k scored jobs (2026-11-14 local copy):
+# median 10, p75 25, p90 47.
+SCORE_BADGE_THRESHOLDS = ((50, "strong"), (25, "good"), (10, "fair"))
 
 
 def _int_arg(name, default, min_value=None, max_value=None):
@@ -23,6 +40,29 @@ def _int_arg(name, default, min_value=None, max_value=None):
     return value
 
 
+def _float_arg(name, default, min_value=0.0, max_value=None):
+    """Read a float query param; invalid, non-finite or out-of-range → default."""
+    try:
+        value = float(request.args.get(name, ""))
+    except ValueError:
+        return default
+    if not math.isfinite(value) or value < min_value:
+        return default
+    if max_value is not None and value > max_value:
+        return default
+    return value
+
+
+def _list_arg(name, allowed=None):
+    """Read a repeated query param: stripped, non-empty, deduplicated, capped."""
+    values = []
+    for value in request.args.getlist(name):
+        value = value.strip()
+        if value and value not in values and (allowed is None or value in allowed):
+            values.append(value)
+    return values[:MAX_LIST_VALUES]
+
+
 def _checkbox_arg(name, default=True):
     """Read a checkbox paired with a hidden "0" input: the last value wins.
 
@@ -32,21 +72,94 @@ def _checkbox_arg(name, default=True):
     return values[-1] == "1" if values else default
 
 
+def _num(value):
+    """Short display for a float filter value: 10.0 → "10", 2.5 → "2.5"."""
+    return "%g" % value
+
+
 @app.template_global()
 def index_url(query_args, **overrides):
     """URL for the index page keeping current params, with some overridden."""
     args = {**query_args, **overrides}
-    return url_for("index", **{k: v for k, v in args.items() if v != ""})
+    return url_for("index", **{k: v for k, v in args.items() if v not in ("", [], None)})
+
+
+@app.template_global()
+def score_badge(score):
+    """Badge class suffix for a weighted score (see SCORE_BADGE_THRESHOLDS)."""
+    if score is None:
+        return "low"
+    for threshold, name in SCORE_BADGE_THRESHOLDS:
+        if score >= threshold:
+            return name
+    return "low"
+
+
+@app.template_global()
+def applicants_label(job):
+    """"<25" / ">200" / exact count / "-".
+
+    A historical 25 without qualifier was stored for "Be among the first 25",
+    so it is shown as "<25" too.
+    """
+    count = job.get("applicant_count")
+    qualifier = job.get("applicant_count_qualifier")
+    if count is None:
+        return "-"
+    if qualifier == "under" or (count == 25 and qualifier is None):
+        return "<%d" % count
+    if qualifier == "over":
+        return ">%d" % count
+    return str(count)
+
+
+def _active_filter_chips(query_args, defaults):
+    """[(label, url)] for every filter that differs from its default; each
+    url resets that one filter (or removes one value of a list filter)."""
+    chips = []
+    reset = dict(page=1)
+
+    def add(label, **overrides):
+        chips.append((label, index_url(query_args, **reset, **overrides)))
+
+    if query_args["q"]:
+        add('Search: "%s"' % query_args["q"], q="")
+    if query_args["days"] != defaults["days"]:
+        add(DAYS_LABELS[query_args["days"]], days=defaults["days"])
+    if query_args["hours"] != "":
+        add("Last %s hours" % query_args["hours"], hours="")
+    if query_args["location"]:
+        add("Location: %s" % query_args["location"], location="")
+    if query_args["min_score"]:
+        add("Score ≥ %s" % _num(query_args["min_score"]), min_score="")
+    if query_args["max_score"] != "":
+        add("Score ≤ %s" % _num(query_args["max_score"]), max_score="")
+    if query_args["min_match"] != "":
+        add("Match ≥ %s%%" % _num(query_args["min_match"]), min_match="")
+    for value in query_args["emp"]:
+        add("Employment: %s" % value, emp=[v for v in query_args["emp"] if v != value])
+    for value in query_args["kw"]:
+        add("Keyword: %s" % value, kw=[v for v in query_args["kw"] if v != value])
+    if query_args["apply"]:
+        add("Apply: %s" % APPLY_LABELS[query_args["apply"]], apply="")
+    if query_args["under25"] == "1":
+        add("Under 25 applicants", under25="0")
+    if query_args["applied"] != defaults["applied"]:
+        add("Applied: %s" % APPLIED_LABELS[query_args["applied"]],
+            applied=defaults["applied"])
+    for name, label in (("hide_blacklisted", "Blacklisted shown"),
+                        ("hide_aggregators", "Aggregators shown"),
+                        ("hide_above_level", "Above my level shown")):
+        if query_args[name] == "0":
+            add(label, **{name: "1"})
+    return chips
 
 
 @app.route("/")
 def index():
-    try:
-        min_score = max(0.0, float(request.args.get("min_score", 0)))
-    except ValueError:
-        min_score = 0.0
-    if not math.isfinite(min_score):
-        min_score = 0.0
+    min_score = _float_arg("min_score", 0.0)
+    max_score = _float_arg("max_score", None)
+    min_match = _float_arg("min_match", None, max_value=100.0)
 
     days_raw = request.args.get("days", "7")
     if days_raw not in DAYS_OPTIONS:
@@ -59,44 +172,63 @@ def index():
         per_page = env.DEFAULT_PER_PAGE
     hours = _int_arg("hours", None, min_value=1, max_value=24 * 365 * 10)
     location = request.args.get("location", "").strip()
+    search = request.args.get("q", "").strip()[:MAX_SEARCH_LENGTH]
     apply_raw = request.args.get("apply", "")
     if apply_raw not in SQLiteStorage.APPLY_FILTERS:
         apply_raw = ""
+    applied = request.args.get("applied", DEFAULT_APPLIED)
+    if applied not in SQLiteStorage.APPLIED_FILTERS:
+        applied = DEFAULT_APPLIED
+    employment_types = _list_arg("emp")
+    keywords = _list_arg("kw", allowed=KEYWORD_OPTIONS)
 
     hide_blacklisted = _checkbox_arg("hide_blacklisted")
     hide_aggregators = _checkbox_arg("hide_aggregators")
     hide_above_level = _checkbox_arg("hide_above_level")
+    under_25 = _checkbox_arg("under25", default=False)
 
     sort = request.args.get("sort", SQLiteStorage.DEFAULT_SORT)
     direction = request.args.get("dir", SQLiteStorage.DEFAULT_DIRECTION)
     if sort not in SQLiteStorage.SORT_COLUMNS or direction not in SQLiteStorage.SORT_DIRECTIONS:
         sort, direction = SQLiteStorage.DEFAULT_SORT, SQLiteStorage.DEFAULT_DIRECTION
 
-    filters = dict(min_score=min_score, unique=True, days=days,
-                   location=location or None, hours=hours,
+    filters = dict(min_score=min_score, max_score=max_score, min_match=min_match,
+                   days=days, location=location or None, hours=hours,
+                   search=search or None, employment_types=employment_types,
+                   keywords=keywords, under_25=under_25, applied=applied,
                    hide_blacklisted=hide_blacklisted,
                    apply_type=apply_raw or None,
                    hide_aggregators=hide_aggregators,
                    hide_above_level=hide_above_level)
 
     storage = SQLiteStorage()
-    total = storage.count_job_summary(**filters)
+    total = storage.count_job_summary(unique=True, **filters)
     total_pages = max(1, math.ceil(total / per_page))
     page = min(page, total_pages)
-    jobs = storage.get_job_summary(page=page, per_page=per_page, sort=sort,
-                                   direction=direction, **filters)
+    jobs = storage.get_job_summary(unique=True, page=page, per_page=per_page,
+                                   sort=sort, direction=direction, **filters)
+    snippets = storage.get_description_snippets([j["linkedin_job_id"] for j in jobs])
+    applications = storage.get_application_status(jobs)
     stats = storage.get_analysis_stats()
     blacklisted = storage.get_blacklisted_companies()
+    employment_options = storage.get_employment_types()
 
     start = (page - 1) * per_page + 1 if jobs else 0
     end = start + len(jobs) - 1 if jobs else 0
 
-    # Normalized params used to build sort/pagination links
+    # Normalized params used to build sort/pagination/chip links
     query_args = {
+        "q": search,
         "min_score": min_score,
+        "max_score": max_score if max_score is not None else "",
+        "min_match": min_match if min_match is not None else "",
         "days": days_raw,
         "location": location,
         "hours": hours if hours is not None else "",
+        "emp": employment_types,
+        "kw": keywords,
+        "under25": "1" if under_25 else "0",
+        "applied": applied,
         "hide_blacklisted": "1" if hide_blacklisted else "0",
         "hide_aggregators": "1" if hide_aggregators else "0",
         "hide_above_level": "1" if hide_above_level else "0",
@@ -106,18 +238,29 @@ def index():
         "dir": direction,
         "page": page,
     }
+    chips = _active_filter_chips(query_args, {"days": "7", "applied": DEFAULT_APPLIED})
+    clear_url = url_for("index", sort=sort, dir=direction, per_page=per_page)
 
     return render_template("index.html", jobs=jobs, stats=stats,
-                           min_score=min_score, blacklisted=blacklisted,
+                           snippets=snippets, applications=applications,
+                           min_score=min_score, max_score=max_score,
+                           min_match=min_match, search=search,
+                           blacklisted=blacklisted,
                            days=days_raw, location=location, hours=hours,
                            hide_blacklisted=hide_blacklisted, apply=apply_raw,
                            hide_aggregators=hide_aggregators,
                            hide_above_level=hide_above_level,
+                           under_25=under_25, applied=applied,
+                           applied_labels=APPLIED_LABELS,
+                           employment_types=employment_types,
+                           employment_options=employment_options,
+                           keywords=keywords, keyword_options=KEYWORD_OPTIONS,
                            above_levels=SQLiteStorage.ABOVE_TARGET_LEVELS,
                            per_page=per_page, per_page_options=PER_PAGE_OPTIONS,
                            sort=sort, direction=direction,
                            page=page, total=total, total_pages=total_pages,
-                           start=start, end=end, query_args=query_args)
+                           start=start, end=end, query_args=query_args,
+                           chips=chips, clear_url=clear_url, num=_num)
 
 
 @app.route("/api/blacklist", methods=["GET"])
@@ -146,6 +289,56 @@ def api_blacklist_remove():
     storage = SQLiteStorage()
     storage.remove_blacklisted_company(company)
     return jsonify({"status": "ok", "company": company})
+
+
+def _application_job_id(data):
+    """Validated linkedin_job_id from a JSON body, or (None, error response)."""
+    job_id = str(data.get("linkedin_job_id") or "").strip()
+    if not re.fullmatch(r"[0-9]+", job_id):
+        return None, (jsonify({"error": "linkedin_job_id required"}), 400)
+    return job_id, None
+
+
+@app.route("/api/applications", methods=["GET"])
+def api_applications_list():
+    storage = SQLiteStorage()
+    return jsonify(storage.get_applications())
+
+
+@app.route("/api/applications", methods=["POST"])
+def api_applications_save():
+    """Mark a job as applied, or update its date/notes."""
+    data = request.get_json(silent=True) or {}
+    job_id, error = _application_job_id(data)
+    if error:
+        return error
+    applied_on = str(data.get("applied_on") or "").strip() or date.today().isoformat()
+    try:
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", applied_on):
+            raise ValueError
+        datetime.strptime(applied_on, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({"error": "applied_on must be YYYY-MM-DD"}), 400
+    notes = str(data.get("notes") or "").strip()
+    if len(notes) > MAX_NOTES_LENGTH:
+        return jsonify({"error": "notes too long (max %d)" % MAX_NOTES_LENGTH}), 400
+    storage = SQLiteStorage()
+    if not storage.job_post_exists(job_id):
+        return jsonify({"error": "unknown job"}), 404
+    storage.save_application(job_id, applied_on, notes or None)
+    return jsonify({"status": "ok", "linkedin_job_id": job_id,
+                    "applied_on": applied_on, "notes": notes or None})
+
+
+@app.route("/api/applications", methods=["DELETE"])
+def api_applications_remove():
+    data = request.get_json(silent=True) or {}
+    job_id, error = _application_job_id(data)
+    if error:
+        return error
+    storage = SQLiteStorage()
+    storage.remove_application(job_id)
+    return jsonify({"status": "ok", "linkedin_job_id": job_id})
 
 
 if __name__ == "__main__":

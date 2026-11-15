@@ -101,7 +101,8 @@ Job Scraper/
     ├── test_search_runs.py      # search_runs tracking (HTTP mocked)
     ├── test_applicant_parsing.py # Applicant caption parsing
     ├── test_apply_detection.py  # Apply type / closed-job detection (uses fixtures/)
-    ├── test_web_app.py          # Web UI apply column and filter (Flask test client)
+    ├── test_web_app.py          # Web UI filters, chips, presentation, applications API
+    │                            # (Flask test client)
     ├── test_backfill_apply_type.py # Backfill selection, no-overwrite, lock (HTTP mocked)
     ├── test_pagination.py       # "See more jobs" pagination, 429, search_runs pages (HTTP mocked)
     ├── test_job_ids.py          # 10-digit job ID extraction/validation
@@ -137,8 +138,8 @@ Job Scraper/
 
 ### Storage
 - **`SQLiteStorage`**: Primary storage (`search_runs`, `job_searches`, `job_posts`,
-  `blacklisted_companies`, `aggregator_companies`); creates and migrates the schema and syncs
-  the aggregator list on init
+  `blacklisted_companies`, `aggregator_companies`, `applications`); creates and migrates the
+  schema and syncs the aggregator list on init
 
 ## Data Flow
 
@@ -308,6 +309,7 @@ CREATE TABLE job_posts (
 )
 -- INDEX idx_job_posts_score    ON job_posts(weighted_score DESC)
 -- INDEX idx_job_posts_datetime ON job_posts(date_time DESC)
+-- INDEX idx_job_posts_employment_type ON job_posts(employment_type)  -- employment type options
 ```
 
 ### Applicant count
@@ -401,11 +403,33 @@ CREATE TABLE aggregator_companies (
   `job_posts` row (so they don't appear in the UI even with the filter off).
   `count_skipped_aggregator_jobs(since)` counts pending ones first seen at/after `since`.
 
+### applications table
+Jobs I applied to, managed via `/api/applications` (GET list; POST upsert
+`{linkedin_job_id, applied_on?, notes?}`; DELETE `{linkedin_job_id}`). POST requires an
+existing `job_posts` row (404 otherwise), `applied_on` as `YYYY-MM-DD` (default: server's
+today; the UI sends the browser's local date) and notes up to 2,000 characters.
+```sql
+CREATE TABLE applications (
+    linkedin_job_id TEXT PRIMARY KEY,
+    applied_on TEXT NOT NULL,          -- YYYY-MM-DD, a local date picked by the user (not UTC)
+    notes TEXT,
+    created_at TEXT,                   -- UTC ISO-8601
+    updated_at TEXT                    -- UTC ISO-8601
+)
+```
+- Web UI filter `applied=hide|only|all` (default `hide`). `hide`/`only` match the job itself
+  **and** any posting with the same `(title, company)` as an applied job, because
+  `job_summary_unique` keeps up to 2 postings per pair (`SQLiteStorage._APPLIED_SQL`).
+  Those twins show a "✓ Similar" button.
+
 ### Views
 - **`job_summary`**: `job_posts INNER JOIN job_searches` on `linkedin_job_id`, `GROUP BY
   linkedin_job_id` (one row per job). Columns: `linkedin_job_id, title, company, location,
   date_time, applicant_count, weighted_score, match_percentage, total_matches,
-  matched_keywords, apply_type, apply_url, seniority_level`.
+  matched_keywords, apply_type, apply_url, seniority_level, applicant_count_qualifier,
+  employment_type, industries`. `description` is deliberately left out (it would be carried
+  through the window function); the UI fetches `SUBSTR(description, 1, 500)` for the current
+  page only (`get_description_snippets()`).
 - **`job_summary_unique`**: same columns; keeps at most 2 rows per `(title, company)`,
   preferring the lowest non-NULL `applicant_count` (`ROW_NUMBER()` window). This is what
   the web app uses. Because of the window function, any query on it scans the whole view
@@ -418,7 +442,39 @@ Generate them with `utils.time_utils.utc_now_iso()`. Compare against them with t
 ```sql
 date_time >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')
 ```
-The web UI converts it to the browser's local time.
+The web UI shows it as relative time ("3h ago") with the local time on hover.
+Exception: `applications.applied_on` is a plain `YYYY-MM-DD` local date.
+
+## Web UI (`web_app.py`, `templates/index.html`)
+- Server-side pagination; every filter is a GET param (bookmarkable). `get_job_summary()` /
+  `count_job_summary()` take the filters as keyword arguments of
+  `SQLiteStorage._build_summary_filters()` (`days` defaults to 7); the view is aliased `v`.
+
+| Param | Filter |
+|---|---|
+| `q` | title or company contains (case-insensitive; `%` / `_` literal) |
+| `days` (`7`/`14`/`30`/`all`), `hours` | posted within |
+| `location` | location contains |
+| `min_score`, `max_score`, `min_match` | score range, min match % |
+| `emp` (repeated) | employment type, any of (options: distinct values in the DB) |
+| `kw` (repeated) | `matched_keywords` contains any of (exact item; options: `DEFAULT_KEYWORDS`) |
+| `under25=1` | `applicant_count < 25`, or `25` with qualifier `under` or NULL (historical) |
+| `apply` | `easy_apply` / `external` / `unknown` |
+| `applied` | `hide` (default) / `only` / `all` (see "applications table") |
+| `hide_blacklisted`, `hide_aggregators`, `hide_above_level` | on (`1`) by default |
+| `sort`, `dir`, `page`, `per_page` | sorting / pagination |
+
+- Checkboxes are paired with a hidden `0` input; the last value wins, absent = default.
+- Active filters that differ from the defaults are shown as chips; each links to the same URL
+  with that filter reset. "Clear filters" keeps only `sort`, `dir`, `per_page`.
+- Score badge: `SCORE_BADGE_THRESHOLDS` in `web_app.py` (≥50 strong, ≥25 good, ≥10 fair,
+  else low; from the 2026-11-14 distribution: median 10, p75 25, p90 47). Revisit after
+  rescoring production.
+- Applicants: `<25` for `under` and for historical `25` + NULL; `>200` for `over`.
+- Styling: Pico CSS, no `data-theme` (follows the OS light/dark setting). Use Pico variables
+  (`--pico-*`) for every color, never hex/rgb (`test_no_light_theme_or_hardcoded_colors`).
+  Below 1100px the Location and Match columns are hidden (both are in the expanded row).
+  No overflow wrapper around the table, which would break the sticky header.
 
 ## LinkedIn HTML Selectors
 

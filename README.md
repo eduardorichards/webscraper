@@ -17,6 +17,13 @@ A Python application that scrapes job listings from LinkedIn based on configurab
 - Web UI filters, on by default: "Hide aggregators" (job boards, talent marketplaces, mass
   reposters from `config/aggregators.json`) and "Hide above my level" (seniority above
   `TARGET_SENIORITY_LEVELS`). Aggregator jobs are not detail-scraped at all.
+- Web UI results page: text search (title/company), employment type, score range, min match %,
+  matched keywords, "Under 25 applicants", active filters as removable chips, expandable rows
+  with seniority / employment type / industries / description excerpt, and dark mode (follows
+  the OS setting). All filters are GET params, so any view can be bookmarked.
+- Application tracking: mark a job as applied (date + optional notes) from the results page;
+  the "Applied" filter (default "Hide applied") also covers postings with the same title and
+  company
 - Scores record the keyword config they were computed with (`scoring_version`);
   `scripts/rescore_jobs.py` re-scores stored jobs without re-fetching
 
@@ -192,7 +199,8 @@ Jobs are stored in SQLite at `data/database/jobs_master.db` (`DB_PATH`). The sch
 and migrated automatically whenever `SQLiteStorage()` is instantiated: new tables and columns
 are added in place, existing data is kept, and running it again does nothing.
 
-All timestamps are UTC ISO-8601 text with seconds and a `Z` suffix, e.g. `2026-10-07T22:11:34Z`.
+All timestamps are UTC ISO-8601 text with seconds and a `Z` suffix, e.g. `2026-10-07T22:11:34Z`
+(except `applications.applied_on`, a plain `YYYY-MM-DD` date picked by the user).
 
 | Table | One row per | Main columns |
 |-------|-------------|--------------|
@@ -201,6 +209,7 @@ All timestamps are UTC ISO-8601 text with seconds and a `Z` suffix, e.g. `2026-1
 | `job_posts` | job (details from the job page + keyword analysis) | `linkedin_job_id` (unique), `description`, `applicant_count`, `applicant_count_qualifier`, `apply_type`, `apply_url`, `seniority_level`, `date_time`, `scraped_at`, `weighted_score`, `matched_keywords`, `scoring_version`, ... |
 | `blacklisted_companies` | company hidden in the web UI | `company`, `added_at` |
 | `aggregator_companies` | aggregator company (synced from `config/aggregators.json`) | `company`, `category`, `reason` |
+| `applications` | job I applied to (managed in the UI) | `linkedin_job_id` (primary key), `applied_on`, `notes`, `created_at`, `updated_at` |
 
 - `search_runs.new_jobs` counts jobs whose `linkedin_job_id` was not in `job_searches` before
   that run. A run with `status` NULL was interrupted before finishing.

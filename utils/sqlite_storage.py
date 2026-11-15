@@ -122,6 +122,17 @@ class SQLiteStorage:
         )
         """)
 
+        # Table 6: Jobs I applied to (one row per linkedin_job_id)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS applications (
+            linkedin_job_id TEXT PRIMARY KEY,
+            applied_on TEXT NOT NULL,
+            notes TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+        """)
+
         # Migrations: columns added after the first release. Existing rows
         # keep NULL (ADD COLUMN does not rewrite the table).
         self._add_column_if_missing(cursor, 'job_searches', 'scraped_at', 'TEXT')
@@ -169,6 +180,11 @@ class SQLiteStorage:
         CREATE INDEX IF NOT EXISTS idx_job_posts_datetime
         ON job_posts(date_time DESC)
         """)
+        # Makes get_employment_types() an index-only scan
+        cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_job_posts_employment_type
+        ON job_posts(employment_type)
+        """)
 
         # View: combined job data for display
         cursor.execute("DROP VIEW IF EXISTS job_summary")
@@ -187,7 +203,10 @@ class SQLiteStorage:
             jp.matched_keywords,
             jp.apply_type,
             jp.apply_url,
-            jp.seniority_level
+            jp.seniority_level,
+            jp.applicant_count_qualifier,
+            jp.employment_type,
+            jp.industries
         FROM job_posts jp
         INNER JOIN job_searches js ON js.linkedin_job_id = jp.linkedin_job_id
         GROUP BY jp.linkedin_job_id
@@ -201,7 +220,8 @@ class SQLiteStorage:
         SELECT linkedin_job_id, title, company, location, date_time,
                applicant_count, weighted_score, match_percentage,
                total_matches, matched_keywords, apply_type, apply_url,
-               seniority_level
+               seniority_level, applicant_count_qualifier, employment_type,
+               industries
         FROM (
             SELECT *,
                 ROW_NUMBER() OVER (
@@ -570,16 +590,56 @@ class SQLiteStorage:
     DEFAULT_DIRECTION = 'desc'
     # Application type filter values; 'unknown' matches NULL
     APPLY_FILTERS = ('easy_apply', 'external', 'unknown')
+    # Applied filter values: 'hide' / 'only' also match postings with the
+    # same (title, company) as an applied job, since job_summary_unique
+    # keeps up to 2 postings per pair
+    APPLIED_FILTERS = ('hide', 'only', 'all')
     # seniority_level values hidden by hide_above_level (from config.settings)
     ABOVE_TARGET_LEVELS = levels_above(TARGET_SENIORITY_LEVELS)
 
-    def _build_summary_filters(self, min_score=0, days=None, location=None,
+    # Row of the summary view `v` is an applied job or a (title, company) twin
+    # of one. IFNULL: rows with a NULL title/company count as not applied.
+    _APPLIED_SQL = (
+        "(v.linkedin_job_id IN (SELECT linkedin_job_id FROM applications)"
+        " OR IFNULL((v.title, v.company) IN ("
+        "SELECT s.title, s.company FROM applications a"
+        " JOIN job_searches s ON s.linkedin_job_id = a.linkedin_job_id), 0))"
+    )
+    # "Under 25 applicants": 'under' qualifier, or a historical 25 with no
+    # qualifier (the old parser stored "Be among the first 25" that way)
+    _UNDER_25_SQL = (
+        "(applicant_count < 25 OR (applicant_count = 25 AND"
+        " (applicant_count_qualifier IS NULL OR applicant_count_qualifier = 'under')))"
+    )
+
+    @staticmethod
+    def _like_pattern(text):
+        """%text% for LIKE ... ESCAPE '\\', with wildcards in text escaped."""
+        escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        return f"%{escaped}%"
+
+    def _build_summary_filters(self, min_score=0, days=7, location=None,
                                hours=None, hide_blacklisted=False,
                                apply_type=None, hide_aggregators=False,
-                               hide_above_level=False):
-        """Build the WHERE clause and bound params shared by summary queries."""
+                               hide_above_level=False, search=None,
+                               employment_types=None, max_score=None,
+                               min_match=None, keywords=None, under_25=False,
+                               applied='all'):
+        """Build the WHERE clause and bound params shared by summary queries.
+
+        The view must be aliased `v`. List filters (employment_types,
+        keywords) match any of their values; an empty list is no filter.
+        """
         clauses = ["weighted_score >= ?"]
         params = [min_score]
+
+        if max_score is not None:
+            clauses.append("weighted_score <= ?")
+            params.append(max_score)
+
+        if min_match is not None:
+            clauses.append("match_percentage >= ?")
+            params.append(min_match)
 
         if days is not None:
             clauses.append("date_time >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?)")
@@ -592,6 +652,27 @@ class SQLiteStorage:
         if location:
             clauses.append("LOWER(location) LIKE LOWER(?)")
             params.append(f"%{location}%")
+
+        if search:
+            clauses.append("(LOWER(title) LIKE LOWER(?) ESCAPE '\\'"
+                           " OR LOWER(company) LIKE LOWER(?) ESCAPE '\\')")
+            pattern = self._like_pattern(search)
+            params.extend([pattern, pattern])
+
+        if employment_types:
+            placeholders = ", ".join("?" * len(employment_types))
+            clauses.append(f"employment_type IN ({placeholders})")
+            params.extend(employment_types)
+
+        if keywords:
+            # matched_keywords is comma-separated: the commas around each
+            # value keep "Java" from matching "JavaScript"
+            clauses.append("(" + " OR ".join(
+                ["instr(',' || matched_keywords || ',', ?) > 0"] * len(keywords)) + ")")
+            params.extend(f",{kw}," for kw in keywords)
+
+        if under_25:
+            clauses.append(self._UNDER_25_SQL)
 
         if hide_blacklisted:
             clauses.append(
@@ -618,26 +699,28 @@ class SQLiteStorage:
                 f"(seniority_level IS NULL OR seniority_level NOT IN ({placeholders}))")
             params.extend(self.ABOVE_TARGET_LEVELS)
 
+        if applied == 'hide':
+            clauses.append(f"NOT {self._APPLIED_SQL}")
+        elif applied == 'only':
+            clauses.append(self._APPLIED_SQL)
+
         return " WHERE " + " AND ".join(clauses), params
 
-    def get_job_summary(self, min_score=0, limit=None, unique=False, days=7,
-                        page=1, per_page=50, location=None, hours=None,
-                        hide_blacklisted=False, sort=DEFAULT_SORT,
-                        direction=DEFAULT_DIRECTION, apply_type=None,
-                        hide_aggregators=False, hide_above_level=False):
+    def get_job_summary(self, limit=None, unique=False, page=1, per_page=50,
+                        sort=DEFAULT_SORT, direction=DEFAULT_DIRECTION,
+                        **filters):
         """Get one page of the job summary view.
 
-        per_page=None disables pagination (all matching rows, or `limit`).
-        Invalid sort/direction values fall back to date_time DESC.
+        filters: keyword arguments of _build_summary_filters (days defaults
+        to 7). per_page=None disables pagination (all matching rows, or
+        `limit`). Invalid sort/direction values fall back to date_time DESC.
         """
         conn = sqlite3.connect(self.db_file)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
         view_name = "job_summary_unique" if unique else "job_summary"
-        where, params = self._build_summary_filters(
-            min_score, days, location, hours, hide_blacklisted, apply_type,
-            hide_aggregators, hide_above_level)
+        where, params = self._build_summary_filters(**filters)
 
         if sort not in self.SORT_COLUMNS or direction not in self.SORT_DIRECTIONS:
             sort, direction = self.DEFAULT_SORT, self.DEFAULT_DIRECTION
@@ -645,7 +728,7 @@ class SQLiteStorage:
         dir_sql = self.SORT_DIRECTIONS[direction]
 
         # NULLs always last; linkedin_job_id as tiebreaker keeps pages stable
-        query = (f"SELECT * FROM {view_name}{where}"
+        query = (f"SELECT * FROM {view_name} v{where}"
                  f" ORDER BY {col} IS NULL, {col} {dir_sql},"
                  f" linkedin_job_id {dir_sql}")
 
@@ -663,23 +746,42 @@ class SQLiteStorage:
 
         return [dict(row) for row in rows]
 
-    def count_job_summary(self, min_score=0, unique=False, days=7,
-                          location=None, hours=None, hide_blacklisted=False,
-                          apply_type=None, hide_aggregators=False,
-                          hide_above_level=False):
+    def count_job_summary(self, unique=False, **filters):
         """Count rows of the job summary view matching the given filters."""
         conn = sqlite3.connect(self.db_file)
         cursor = conn.cursor()
 
         view_name = "job_summary_unique" if unique else "job_summary"
-        where, params = self._build_summary_filters(
-            min_score, days, location, hours, hide_blacklisted, apply_type,
-            hide_aggregators, hide_above_level)
+        where, params = self._build_summary_filters(**filters)
 
-        cursor.execute(f"SELECT COUNT(*) FROM {view_name}{where}", params)
+        cursor.execute(f"SELECT COUNT(*) FROM {view_name} v{where}", params)
         total = cursor.fetchone()[0]
         conn.close()
         return total
+
+    def get_employment_types(self):
+        """Distinct non-empty job_posts.employment_type values, sorted."""
+        conn = sqlite3.connect(self.db_file)
+        rows = conn.execute(
+            "SELECT DISTINCT employment_type FROM job_posts"
+            " WHERE employment_type IS NOT NULL AND employment_type != ''"
+            " ORDER BY employment_type").fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+
+    def get_description_snippets(self, job_ids, length=500):
+        """{linkedin_job_id: first `length` chars of the description} for
+        the given IDs (one page of results, kept out of the views)."""
+        if not job_ids:
+            return {}
+        placeholders = ", ".join("?" * len(job_ids))
+        conn = sqlite3.connect(self.db_file)
+        rows = conn.execute(
+            f"SELECT linkedin_job_id, SUBSTR(description, 1, ?) FROM job_posts"
+            f" WHERE linkedin_job_id IN ({placeholders})",
+            [int(length)] + list(job_ids)).fetchall()
+        conn.close()
+        return {r[0]: r[1] for r in rows if r[1]}
 
     def export_job_summary_csv(self, filepath=None, min_score=0, unique=True):
         """Export job summary to CSV file."""
@@ -744,3 +846,77 @@ class SQLiteStorage:
         rows = cursor.fetchall()
         conn.close()
         return [r[0] for r in rows]
+
+    def job_post_exists(self, linkedin_job_id):
+        """True if job_posts has a row for this ID."""
+        conn = sqlite3.connect(self.db_file)
+        row = conn.execute("SELECT 1 FROM job_posts WHERE linkedin_job_id = ?",
+                           (linkedin_job_id,)).fetchone()
+        conn.close()
+        return row is not None
+
+    def save_application(self, linkedin_job_id, applied_on, notes=None):
+        """Mark a job as applied, or update its date/notes (upsert).
+
+        applied_on: 'YYYY-MM-DD' (a local date picked by the user).
+        """
+        now = utc_now_iso()
+        conn = sqlite3.connect(self.db_file)
+        conn.execute("""
+            INSERT INTO applications
+                (linkedin_job_id, applied_on, notes, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(linkedin_job_id) DO UPDATE SET
+                applied_on = excluded.applied_on,
+                notes = excluded.notes,
+                updated_at = excluded.updated_at
+        """, (linkedin_job_id, applied_on, notes, now, now))
+        conn.commit()
+        conn.close()
+
+    def remove_application(self, linkedin_job_id):
+        """Unmark a job as applied."""
+        conn = sqlite3.connect(self.db_file)
+        conn.execute("DELETE FROM applications WHERE linkedin_job_id = ?",
+                     (linkedin_job_id,))
+        conn.commit()
+        conn.close()
+
+    def get_applications(self):
+        """All applications, most recently applied first."""
+        conn = sqlite3.connect(self.db_file)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT linkedin_job_id, applied_on, notes, created_at, updated_at"
+            " FROM applications ORDER BY applied_on DESC, linkedin_job_id").fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    def get_application_status(self, jobs):
+        """Application info for one page of summary rows.
+
+        Returns {linkedin_job_id: {'applied_on', 'notes', 'similar'}}, only for
+        jobs that are applied (similar=False) or share (title, company) with
+        an applied job (similar=True, applied_on of that job).
+        """
+        conn = sqlite3.connect(self.db_file)
+        own = {r[0]: (r[1], r[2]) for r in conn.execute(
+            "SELECT linkedin_job_id, applied_on, notes FROM applications")}
+        pairs = {}
+        for title, company, applied_on in conn.execute(
+                "SELECT s.title, s.company, a.applied_on FROM applications a"
+                " JOIN job_searches s ON s.linkedin_job_id = a.linkedin_job_id"):
+            if title is not None and company is not None:
+                pairs[(title, company)] = max(applied_on, pairs.get((title, company), ''))
+        conn.close()
+
+        status = {}
+        for job in jobs:
+            job_id = job['linkedin_job_id']
+            if job_id in own:
+                applied_on, notes = own[job_id]
+                status[job_id] = {'applied_on': applied_on, 'notes': notes, 'similar': False}
+            elif (job.get('title'), job.get('company')) in pairs:
+                status[job_id] = {'applied_on': pairs[(job['title'], job['company'])],
+                                  'notes': None, 'similar': True}
+        return status

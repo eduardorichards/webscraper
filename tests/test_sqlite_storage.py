@@ -210,5 +210,133 @@ class TestJobSummaryPagination(unittest.TestCase):
         self.assertEqual({j['apply_url'] for j in jobs}, {'https://jobs.example.com/apply'})
 
 
+class TestResultFilters(unittest.TestCase):
+    """Text search, employment type, score/match range, keywords, under 25
+    and applied filters of get_job_summary / count_job_summary."""
+
+    JOBS = [
+        # (id, title, company, score, match %, keywords, employment,
+        #  applicants, qualifier)
+        ('3001', 'Java Backend Developer', 'Acme', 60.0, 50.0, 'Java,Spring,SQL',
+         'Full-time', 25, 'under'),
+        ('3002', 'JavaScript Developer', 'Globex', 30.0, 20.0, 'JavaScript,React',
+         'Contract', 25, None),            # historical "first 25"
+        ('3003', 'Python 100% Remote', 'Initech', 12.0, 10.0, 'Python',
+         'Full-time', 87, None),
+        ('3004', 'Data Engineer', 'Java_Corp', 5.0, 5.0, None,
+         'Part-time', 200, 'over'),
+        ('3005', 'Java Backend Developer', 'Acme', 55.0, 45.0, 'Java',
+         'Full-time', 12, None),           # twin of 3001 (same title + company)
+        ('3006', 'QA Tester', None, 1.0, 1.0, 'SQL', '', None, None),
+    ]
+
+    def setUp(self):
+        fd, self.db_path = tempfile.mkstemp(suffix='.db')
+        os.close(fd)
+        with redirect_stdout(StringIO()):
+            self.storage = SQLiteStorage(db_file=self.db_path)
+        conn = sqlite3.connect(self.db_path)
+        for (job_id, title, company, score, match, kws, emp, count,
+             qualifier) in self.JOBS:
+            conn.execute(
+                "INSERT INTO job_searches (linkedin_job_id, title, company, location)"
+                " VALUES (?, ?, ?, 'Remote')", (job_id, title, company))
+            conn.execute(
+                "INSERT INTO job_posts (linkedin_job_id, date_time, weighted_score,"
+                " match_percentage, matched_keywords, employment_type, applicant_count,"
+                " applicant_count_qualifier, description)"
+                " VALUES (?, '2026-11-01T10:00:00Z', ?, ?, ?, ?, ?, ?, ?)",
+                (job_id, score, match, kws, emp, count, qualifier, 'x' * 600))
+        conn.commit()
+        conn.close()
+
+    def tearDown(self):
+        os.remove(self.db_path)
+
+    def _ids(self, **filters):
+        jobs = self.storage.get_job_summary(days=None, per_page=None, **filters)
+        ids = sorted(j['linkedin_job_id'] for j in jobs)
+        self.assertEqual(self.storage.count_job_summary(days=None, **filters), len(ids))
+        return ids
+
+    def test_search_title_and_company_case_insensitive(self):
+        self.assertEqual(self._ids(search='JAVA'), ['3001', '3002', '3004', '3005'])
+        self.assertEqual(self._ids(search='globex'), ['3002'])
+
+    def test_search_wildcards_are_literal(self):
+        self.assertEqual(self._ids(search='100%'), ['3003'])
+        self.assertEqual(self._ids(search='a_c'), ['3004'])
+        self.assertEqual(self._ids(search='%'), ['3003'])
+
+    def test_employment_types_any_of(self):
+        self.assertEqual(self._ids(employment_types=['Contract', 'Part-time']),
+                         ['3002', '3004'])
+        self.assertEqual(len(self._ids(employment_types=[])), 6)
+        self.assertEqual(self.storage.get_employment_types(),
+                         ['Contract', 'Full-time', 'Part-time'])
+
+    def test_score_range_and_min_match(self):
+        self.assertEqual(self._ids(min_score=10, max_score=55), ['3002', '3003', '3005'])
+        self.assertEqual(self._ids(min_match=45), ['3001', '3005'])
+
+    def test_keywords_any_of_with_exact_boundaries(self):
+        self.assertEqual(self._ids(keywords=['Java']), ['3001', '3005'])
+        self.assertEqual(self._ids(keywords=['JavaScript']), ['3002'])
+        self.assertEqual(self._ids(keywords=['SQL', 'Python']), ['3001', '3003', '3006'])
+
+    def test_under_25_includes_historical_25(self):
+        # 'under', historical 25 + NULL, exact 12; not 87, 'over' 200, NULL
+        self.assertEqual(self._ids(under_25=True), ['3001', '3002', '3005'])
+
+    def test_applied_hides_job_and_its_twins(self):
+        self.storage.save_application('3001', '2026-11-10', 'sent CV')
+        self.assertEqual(self._ids(applied='hide'), ['3002', '3003', '3004', '3006'])
+        self.assertEqual(self._ids(applied='only'), ['3001', '3005'])
+        self.assertEqual(len(self._ids(applied='all')), 6)
+
+    def test_applied_null_title_company_not_hidden(self):
+        self.storage.save_application('3006', '2026-11-10')
+        self.assertEqual(self._ids(applied='only'), ['3006'])
+        self.assertNotIn('3006', self._ids(applied='hide'))
+        self.assertEqual(len(self._ids(applied='hide')), 5)
+
+    def test_filters_combine(self):
+        self.assertEqual(
+            self._ids(search='developer', keywords=['Java', 'React'], under_25=True,
+                      employment_types=['Full-time'], min_score=56), ['3001'])
+
+    def test_application_upsert_and_remove(self):
+        self.storage.save_application('3001', '2026-11-10', 'first')
+        self.storage.save_application('3001', '2026-11-11', None)
+        apps = self.storage.get_applications()
+        self.assertEqual(len(apps), 1)
+        self.assertEqual((apps[0]['applied_on'], apps[0]['notes']), ('2026-11-11', None))
+        self.assertIsNotNone(apps[0]['created_at'])
+        self.storage.remove_application('3001')
+        self.assertEqual(self.storage.get_applications(), [])
+
+    def test_application_status_marks_twins_as_similar(self):
+        self.storage.save_application('3001', '2026-11-10', 'sent CV')
+        jobs = self.storage.get_job_summary(days=None, per_page=None)
+        status = self.storage.get_application_status(jobs)
+        self.assertEqual(status['3001'],
+                         {'applied_on': '2026-11-10', 'notes': 'sent CV', 'similar': False})
+        self.assertEqual(status['3005']['similar'], True)
+        self.assertEqual(set(status), {'3001', '3005'})
+
+    def test_description_snippets(self):
+        snippets = self.storage.get_description_snippets(['3001', '3002', '9999'], length=500)
+        self.assertEqual(set(snippets), {'3001', '3002'})
+        self.assertEqual(len(snippets['3001']), 500)
+        self.assertEqual(self.storage.get_description_snippets([]), {})
+
+    def test_views_expose_new_columns(self):
+        job = self.storage.get_job_summary(days=None, unique=True, per_page=None,
+                                           search='Initech')[0]
+        self.assertEqual(job['employment_type'], 'Full-time')
+        self.assertIn('industries', job)
+        self.assertIn('applicant_count_qualifier', job)
+
+
 if __name__ == '__main__':
     unittest.main()

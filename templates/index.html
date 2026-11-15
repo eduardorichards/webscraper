@@ -1,57 +1,148 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Job Scraper Results</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <style>
+        /* Only Pico variables for colors, so light and dark (OS setting) both work */
         :root { --pico-font-size: 87.5%; }
-        body { padding: 1rem 2rem; }
-        .stats { display: flex; gap: 2rem; margin-bottom: 1rem; }
-        .stats div { text-align: center; }
-        .stats strong { display: block; font-size: 1.4rem; }
-        .controls { display: flex; flex-wrap: wrap; gap: 1rem 2rem; align-items: center; margin-bottom: 1rem; }
-        .controls label, .controls input, .controls select { margin-bottom: 0; }
-        .controls input[type=number] { width: 6rem; }
-        .controls input[type=text] { width: 12rem; }
-        .controls select { width: auto; }
-        table { font-size: 0.85rem; }
-        th { user-select: none; white-space: nowrap; }
-        th a { text-decoration: none; color: inherit; }
-        th .arrow { margin-left: 0.3rem; opacity: 0.25; }
-        th.active .arrow { opacity: 1; }
-        td { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .pager { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin: 0.5rem 0; font-size: 0.85rem; }
-        .pager .disabled { opacity: 0.4; }
-        .blacklist-panel { margin-bottom: 1rem; }
+        body { padding: 1rem 1.5rem; }
+        h1 { margin-bottom: 0.5rem; }
+        .stats { display: flex; flex-wrap: wrap; gap: 0.25rem 1.5rem; margin-bottom: 0.75rem;
+                 color: var(--pico-muted-color); font-size: 0.85rem; }
+        .stats strong { color: var(--pico-color); }
+
+        /* Filters */
+        .filters { border: 1px solid var(--pico-muted-border-color); border-radius: var(--pico-border-radius);
+                   background: var(--pico-card-background-color); padding: 0.6rem 0.8rem; margin-bottom: 0.5rem; }
+        .filter-row { display: flex; flex-wrap: wrap; gap: 0.5rem 1.25rem; align-items: center; }
+        .filter-row + .filter-row { margin-top: 0.5rem; }
+        .filters label { display: inline-flex; align-items: center; gap: 0.35rem; margin: 0; white-space: nowrap; }
+        .filters input:not([type=checkbox]), .filters select, .filters button,
+        .filters details.dropdown summary { margin: 0; padding: 0.25rem 0.5rem; height: auto; font-size: 0.85rem; }
+        .filters input[type=checkbox] { margin: 0; }
+        .filters input[type=number] { width: 5rem; }
+        .filters input[name=hours] { width: 4rem; }
+        .filters input[name=q] { width: 16rem; padding-inline-start: 2rem; background-position: center left 0.6rem; }
+        .filters button { width: auto; }
+        .filters input[name=location] { width: 10rem; }
+        .filters select { width: auto; padding-right: 2rem; }
+        .filters details.dropdown { margin: 0; }
+        .filters details.dropdown summary { min-width: 9rem; max-width: 16rem; overflow: hidden; text-overflow: ellipsis; }
+        .filters details.dropdown summary::after { height: 1rem; }
+        .filters details.dropdown > ul { max-height: 18rem; overflow-y: auto; z-index: 10; min-width: 12rem; }
+        .filters details.dropdown > ul li { padding: 0.15rem 0.6rem; }
+        .filters .push { margin-left: auto; }
+
+        /* Active filter chips */
+        .chips { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; margin: 0.5rem 0; font-size: 0.8rem; }
+        .chip { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.1rem 0.55rem;
+                border-radius: 1rem; border: 1px solid var(--pico-muted-border-color);
+                background: var(--pico-card-sectioning-background-color); color: var(--pico-color);
+                text-decoration: none; white-space: nowrap; }
+        a.chip:hover { border-color: var(--pico-primary); text-decoration: none; }
+        .chip .x { color: var(--pico-muted-color); }
+
+        /* Blacklist panel */
+        .blacklist-panel { margin-bottom: 0.5rem; }
         .blacklist-panel summary { cursor: pointer; font-weight: 600; }
         .blacklist-tags { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0; }
-        .blacklist-tag { display: inline-flex; align-items: center; gap: 0.3rem;
-                         background: #eee; padding: 0.15rem 0.5rem; border-radius: 1rem;
-                         font-size: 0.8rem; }
-        .blacklist-tag button { background: none; border: none; cursor: pointer;
-                                padding: 0; font-size: 0.9rem; line-height: 1; }
-        .blacklist-add { display: flex; gap: 0.5rem; align-items: center; }
-        .blacklist-add input { margin: 0; }
-        tr.blacklisted { opacity: 0.4; }
-        .apply-badge { background: #0a66c2; color: #fff; padding: 0.1rem 0.45rem;
-                       border-radius: 1rem; font-size: 0.75rem; white-space: nowrap; }
-        .block-btn { background: none; border: 1px solid #ccc; padding: 0.1rem 0.4rem;
-                     font-size: 0.75rem; cursor: pointer; border-radius: 0.2rem; }
+        .blacklist-tag button { background: none; border: none; cursor: pointer; color: var(--pico-muted-color);
+                                padding: 0; margin: 0; font-size: 0.9rem; line-height: 1; width: auto; }
+        .blacklist-add { display: flex; gap: 0.5rem; align-items: center; max-width: 30rem; }
+        .blacklist-add input, .blacklist-add button { margin: 0; padding: 0.25rem 0.5rem; width: auto; }
+
+        /* Pager */
+        .pager { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin: 0.5rem 0; font-size: 0.85rem; }
+        .pager .disabled { opacity: 0.4; }
+
+        /* Results table: sticky header (no overflow wrapper, which would break sticky) */
+        table.jobs { font-size: 0.82rem; width: 100%; margin-bottom: 0.5rem; }
+        table.jobs th, table.jobs td { padding: 0.3rem 0.45rem; vertical-align: top; }
+        table.jobs thead th { position: sticky; top: 0; z-index: 2; background: var(--pico-background-color);
+                              box-shadow: inset 0 -1px 0 var(--pico-muted-border-color); white-space: nowrap; user-select: none; }
+        th a { text-decoration: none; color: inherit; }
+        th .arrow { margin-left: 0.2rem; opacity: 0.25; }
+        th .active .arrow { opacity: 1; }
+        th .sep { color: var(--pico-muted-color); margin: 0 0.15rem; }
+        td.nowrap { white-space: nowrap; }
+        td.job-cell { max-width: 22rem; }
+        .job-title, .job-company, td.location { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        td.location { max-width: 11rem; display: table-cell; }
+        .job-company { color: var(--pico-muted-color); font-size: 0.78rem; }
+        tr.blacklisted > td { opacity: 0.45; }
+        .toggle { background: none; border: none; color: var(--pico-muted-color); padding: 0 0.2rem; margin: 0;
+                  width: auto; cursor: pointer; font-size: 0.9rem; line-height: 1.4; transition: transform 0.15s; }
+        .toggle:focus { box-shadow: none; }
+        .toggle:focus-visible { outline: 2px solid var(--pico-primary); }
+        .toggle[aria-expanded=true] { transform: rotate(90deg); }
+        tr.details > td { background: var(--pico-card-sectioning-background-color); font-size: 0.8rem; }
+        tr.details dl { display: flex; flex-wrap: wrap; gap: 0.2rem 1.25rem; margin: 0 0 0.4rem; }
+        tr.details dt { color: var(--pico-muted-color); font-weight: normal; }
+        tr.details dt::after { content: ":"; }
+        tr.details dd { margin: 0 0 0 0.3rem; }
+        tr.details dl > div { display: flex; }
+        tr.details .snippet { margin: 0; white-space: pre-line; max-width: 75rem; color: var(--pico-color); }
+        tr.details .muted { color: var(--pico-muted-color); }
+
+        /* Badges and chips (color-mix tints keep contrast in both themes) */
+        .score { display: inline-block; min-width: 2.6rem; text-align: center; padding: 0.05rem 0.4rem;
+                 border-radius: 1rem; font-weight: 600; font-variant-numeric: tabular-nums; border: 1px solid; }
+        .score-strong { color: var(--pico-ins-color); border-color: var(--pico-ins-color);
+                        background: color-mix(in srgb, var(--pico-ins-color) 18%, transparent); }
+        .score-good { color: var(--pico-primary); border-color: var(--pico-primary);
+                      background: color-mix(in srgb, var(--pico-primary) 15%, transparent); }
+        .score-fair { color: var(--pico-color); border-color: var(--pico-secondary);
+                      background: color-mix(in srgb, var(--pico-secondary) 12%, transparent); }
+        .score-low { color: var(--pico-muted-color); border-color: var(--pico-muted-border-color); background: transparent;
+                     font-weight: normal; }
+        .kw { display: inline-block; padding: 0 0.35rem; margin: 0 0.15rem 0.15rem 0; border-radius: 0.25rem;
+              font-size: 0.72rem; background: var(--pico-code-background-color); color: var(--pico-code-color, var(--pico-color));
+              border: 1px solid var(--pico-muted-border-color); white-space: nowrap; }
+        .kw-more { font-size: 0.72rem; color: var(--pico-muted-color); white-space: nowrap; }
+        td.keywords { max-width: 16rem; }
+        .apply-badge { background: var(--pico-primary-background); color: var(--pico-primary-inverse);
+                       padding: 0.05rem 0.45rem; border-radius: 1rem; font-size: 0.72rem; white-space: nowrap; }
+        .applicants-under { color: var(--pico-ins-color); font-weight: 600; }
+
+        /* Row actions */
+        td.actions { white-space: nowrap; }
+        .mini { background: transparent; border: 1px solid var(--pico-muted-border-color); color: var(--pico-muted-color);
+                padding: 0.05rem 0.4rem; margin: 0 0 0 0.25rem; font-size: 0.72rem; width: auto;
+                border-radius: 0.25rem; cursor: pointer; line-height: 1.5; }
+        .mini:hover { border-color: var(--pico-primary); color: var(--pico-primary); }
+        .mini.applied { border-color: var(--pico-ins-color); color: var(--pico-ins-color);
+                        background: color-mix(in srgb, var(--pico-ins-color) 15%, transparent); }
+        .mini.similar { border-style: dashed; }
+
+        dialog article { max-width: 32rem; }
+        dialog textarea { resize: vertical; }
+        dialog .error { color: var(--pico-del-color); font-size: 0.8rem; }
+
+        /* Narrow laptop: drop columns that are repeated in the expanded row */
+        @media (max-width: 1100px) {
+            body { padding: 0.75rem; }
+            table.jobs .col-opt { display: none; }
+            td.job-cell { max-width: 16rem; }
+            td.keywords { max-width: 11rem; }
+        }
     </style>
 </head>
 <body>
-    {% macro sort_th(key, label, first_dir='asc') %}
-        {% set active = sort == key %}
-        {% if active %}
-            {% set next_dir = 'asc' if direction == 'desc' else 'desc' %}
-        {% else %}
-            {% set next_dir = first_dir %}
-        {% endif %}
-        <th class="{{ 'active' if active }}">
-            <a href="{{ index_url(query_args, sort=key, dir=next_dir, page=1) }}">{{ label }}<span class="arrow">{% if active and direction == 'desc' %}&#9660;{% else %}&#9650;{% endif %}</span></a>
-        </th>
+    {% macro sort_link(key, label, first_dir='asc') %}
+        {%- set active = sort == key -%}
+        {%- if active -%}
+            {%- set next_dir = 'asc' if direction == 'desc' else 'desc' -%}
+        {%- else -%}
+            {%- set next_dir = first_dir -%}
+        {%- endif -%}
+        <a class="{{ 'active' if active }}" href="{{ index_url(query_args, sort=key, dir=next_dir, page=1) }}">{{ label }}<span class="arrow">{% if active and direction == 'desc' %}&#9660;{% else %}&#9650;{% endif %}</span></a>
+    {%- endmacro %}
+
+    {% macro sort_th(key, label, first_dir='asc', cls='') %}
+        <th class="{{ cls }}">{{ sort_link(key, label, first_dir) }}</th>
     {% endmacro %}
 
     {% macro pager() %}
@@ -75,20 +166,31 @@
     </nav>
     {% endmacro %}
 
+    {% macro dropdown(name, label, options, selected) %}
+        <details class="dropdown" data-multi>
+            <summary title="{{ selected|join(', ') }}">{{ label }}: {{ selected|join(', ') if selected else 'Any' }}</summary>
+            <ul>
+                {% for opt in options %}
+                <li><label><input type="checkbox" name="{{ name }}" value="{{ opt }}" {% if opt in selected %}checked{% endif %}> {{ opt }}</label></li>
+                {% endfor %}
+            </ul>
+        </details>
+    {% endmacro %}
+
     <h1>Job Scraper Results</h1>
 
     <div class="stats">
-        <div><strong>{{ stats.total_analyzed }}</strong><small>Jobs Analyzed</small></div>
-        <div><strong>{{ "%.1f"|format(stats.avg_score) }}</strong><small>Avg Score</small></div>
-        <div><strong>{{ "%.1f"|format(stats.max_score) }}</strong><small>Max Score</small></div>
-        <div><strong>{{ "%.1f"|format(stats.avg_match_pct) }}%</strong><small>Avg Match %</small></div>
+        <span><strong>{{ stats.total_analyzed }}</strong> analyzed</span>
+        <span>avg score <strong>{{ "%.1f"|format(stats.avg_score) }}</strong></span>
+        <span>max score <strong>{{ "%.1f"|format(stats.max_score) }}</strong></span>
+        <span>avg match <strong>{{ "%.1f"|format(stats.avg_match_pct) }}%</strong></span>
     </div>
 
     <details class="blacklist-panel" id="blacklistPanel">
         <summary>Blacklisted companies (<span id="blacklistCount">{{ blacklisted|length }}</span>)</summary>
         <div class="blacklist-tags" id="blacklistTags">
             {% for c in blacklisted %}
-            <span class="blacklist-tag" data-company="{{ c }}">
+            <span class="chip blacklist-tag" data-company="{{ c }}">
                 {{ c }}<button type="button" class="unblock-btn" aria-label="Unblock">✕</button>
             </span>
             {% endfor %}
@@ -99,129 +201,208 @@
         </div>
     </details>
 
-    <form class="controls" method="get" id="filterForm">
+    <form class="filters" method="get" id="filterForm">
         {# Any filter change resubmits the form, which always goes back to page 1 #}
         <input type="hidden" name="page" value="1">
         <input type="hidden" name="sort" value="{{ sort }}">
         <input type="hidden" name="dir" value="{{ direction }}">
-        <label>
-            Min score:
-            <input type="number" name="min_score" value="{{ min_score }}" step="0.5" min="0"
-                   onchange="this.form.submit()">
-        </label>
-        <label>
-            Period:
-            <select name="days" onchange="this.form.submit()">
-                <option value="7"   {% if days == '7'   %}selected{% endif %}>Last 7 days</option>
-                <option value="14"  {% if days == '14'  %}selected{% endif %}>Last 14 days</option>
-                <option value="30"  {% if days == '30'  %}selected{% endif %}>Last 30 days</option>
-                <option value="all" {% if days == 'all' %}selected{% endif %}>All time</option>
-            </select>
-        </label>
-        <label>
-            Last
-            <input type="number" name="hours" value="{{ hours if hours is not none else '' }}" min="1"
-                   placeholder="#" style="width:4.5rem; display:inline-block;" onchange="this.form.submit()">
-            hours
-        </label>
-        <label>
-            Location:
-            <input type="text" name="location" value="{{ location }}" placeholder="Filter..."
-                   onchange="this.form.submit()">
-        </label>
-        <label>
-            Apply:
-            <select name="apply" onchange="this.form.submit()">
-                <option value=""           {% if apply == ''           %}selected{% endif %}>All</option>
-                <option value="easy_apply" {% if apply == 'easy_apply' %}selected{% endif %}>Easy Apply</option>
-                <option value="external"   {% if apply == 'external'   %}selected{% endif %}>External</option>
-                <option value="unknown"    {% if apply == 'unknown'    %}selected{% endif %}>Unknown</option>
-            </select>
-        </label>
-        <label>
-            <input type="hidden" name="hide_blacklisted" value="0">
-            <input type="checkbox" name="hide_blacklisted" value="1" {% if hide_blacklisted %}checked{% endif %}
-                   onchange="this.form.submit()">
-            Hide blacklisted
-        </label>
-        <label title="Companies in config/aggregators.json (job boards, talent marketplaces, mass reposters)">
-            <input type="hidden" name="hide_aggregators" value="0">
-            <input type="checkbox" name="hide_aggregators" value="1" {% if hide_aggregators %}checked{% endif %}
-                   onchange="this.form.submit()">
-            Hide aggregators
-        </label>
-        <label title="Hides seniority: {{ above_levels|join(', ') }}. Unknown and Not Applicable are kept.">
-            <input type="hidden" name="hide_above_level" value="0">
-            <input type="checkbox" name="hide_above_level" value="1" {% if hide_above_level %}checked{% endif %}
-                   onchange="this.form.submit()">
-            Hide above my level
-        </label>
-        <label>
-            Per page:
-            <select name="per_page" onchange="this.form.submit()">
-                {% for n in per_page_options %}
-                <option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }}</option>
-                {% endfor %}
-            </select>
-        </label>
+        <div class="filter-row">
+            <input type="search" name="q" value="{{ search }}" placeholder="Search title or company…"
+                   aria-label="Search title or company" onchange="this.form.submit()">
+            <label>
+                Period
+                <select name="days" onchange="this.form.submit()">
+                    <option value="7"   {% if days == '7'   %}selected{% endif %}>Last 7 days</option>
+                    <option value="14"  {% if days == '14'  %}selected{% endif %}>Last 14 days</option>
+                    <option value="30"  {% if days == '30'  %}selected{% endif %}>Last 30 days</option>
+                    <option value="all" {% if days == 'all' %}selected{% endif %}>All time</option>
+                </select>
+            </label>
+            <label>
+                Last
+                <input type="number" name="hours" value="{{ hours if hours is not none else '' }}" min="1"
+                       placeholder="#" onchange="this.form.submit()">
+                hours
+            </label>
+            <label>
+                Location
+                <input type="text" name="location" value="{{ location }}" placeholder="Filter…"
+                       onchange="this.form.submit()">
+            </label>
+        </div>
+        <div class="filter-row">
+            <label>
+                Score
+                <input type="number" name="min_score" value="{{ num(min_score) if min_score else '' }}" step="any" min="0"
+                       placeholder="min" aria-label="Min score" onchange="this.form.submit()">
+                –
+                <input type="number" name="max_score" value="{{ num(max_score) if max_score is not none else '' }}" step="any" min="0"
+                       placeholder="max" aria-label="Max score" onchange="this.form.submit()">
+            </label>
+            <label>
+                Match % ≥
+                <input type="number" name="min_match" value="{{ num(min_match) if min_match is not none else '' }}" step="any" min="0" max="100"
+                       placeholder="%" onchange="this.form.submit()">
+            </label>
+            {{ dropdown('emp', 'Employment', employment_options, employment_types) }}
+            {{ dropdown('kw', 'Keywords', keyword_options, keywords) }}
+        </div>
+        <div class="filter-row">
+            <label>
+                Apply
+                <select name="apply" onchange="this.form.submit()">
+                    <option value=""           {% if apply == ''           %}selected{% endif %}>All</option>
+                    <option value="easy_apply" {% if apply == 'easy_apply' %}selected{% endif %}>Easy Apply</option>
+                    <option value="external"   {% if apply == 'external'   %}selected{% endif %}>External</option>
+                    <option value="unknown"    {% if apply == 'unknown'    %}selected{% endif %}>Unknown</option>
+                </select>
+            </label>
+            <label title="Hide/only also covers postings with the same title and company as an applied job">
+                Applied
+                <select name="applied" onchange="this.form.submit()">
+                    {% for value, text in applied_labels.items() %}
+                    <option value="{{ value }}" {% if applied == value %}selected{% endif %}>{{ text }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label title="Includes historical rows stored as 25 without a qualifier">
+                <input type="hidden" name="under25" value="0">
+                <input type="checkbox" name="under25" value="1" {% if under_25 %}checked{% endif %}
+                       onchange="this.form.submit()">
+                Under 25 applicants
+            </label>
+            <label>
+                <input type="hidden" name="hide_blacklisted" value="0">
+                <input type="checkbox" name="hide_blacklisted" value="1" {% if hide_blacklisted %}checked{% endif %}
+                       onchange="this.form.submit()">
+                Hide blacklisted
+            </label>
+            <label title="Companies in config/aggregators.json (job boards, talent marketplaces, mass reposters)">
+                <input type="hidden" name="hide_aggregators" value="0">
+                <input type="checkbox" name="hide_aggregators" value="1" {% if hide_aggregators %}checked{% endif %}
+                       onchange="this.form.submit()">
+                Hide aggregators
+            </label>
+            <label title="Hides seniority: {{ above_levels|join(', ') }}. Unknown and Not Applicable are kept.">
+                <input type="hidden" name="hide_above_level" value="0">
+                <input type="checkbox" name="hide_above_level" value="1" {% if hide_above_level %}checked{% endif %}
+                       onchange="this.form.submit()">
+                Hide above my level
+            </label>
+            <label class="push">
+                Per page
+                <select name="per_page" onchange="this.form.submit()">
+                    {% for n in per_page_options %}
+                    <option value="{{ n }}" {% if n == per_page %}selected{% endif %}>{{ n }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button type="submit">Apply</button>
+        </div>
     </form>
+
+    {% if chips %}
+    <div class="chips" id="activeFilters">
+        <small>Active:</small>
+        {% for label, href in chips %}
+        <a class="chip" href="{{ href }}" title="Remove this filter">{{ label }} <span class="x">✕</span></a>
+        {% endfor %}
+        <a href="{{ clear_url }}" id="clearFilters">Clear filters</a>
+    </div>
+    {% endif %}
 
     {% if jobs %}
     {{ pager() }}
-    <figure>
-        <table role="grid" id="jobTable">
-            <thead>
-                <tr>
-                    {{ sort_th('linkedin_job_id', 'Job ID') }}
-                    {{ sort_th('title', 'Title') }}
-                    {{ sort_th('company', 'Company') }}
-                    {{ sort_th('location', 'Location') }}
-                    {{ sort_th('date_time', 'Date', 'desc') }}
-                    <th>Seniority</th>
-                    {{ sort_th('applicant_count', 'Applicants') }}
-                    {{ sort_th('total_matches', 'Matches', 'desc') }}
-                    {{ sort_th('weighted_score', 'Score', 'desc') }}
-                    {{ sort_th('match_percentage', 'Match %', 'desc') }}
-                    <th>Apply</th>
-                    <th>Link</th>
-                    <th>Block</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for job in jobs %}
-                <tr class="{{ 'blacklisted' if job.company in blacklisted }}">
-                    <td>{{ job.linkedin_job_id or "-" }}</td>
-                    <td title="{{ job.title or '' }}">{{ job.title or "-" }}</td>
-                    <td title="{{ job.company or '' }}">{{ job.company or "-" }}</td>
-                    <td title="{{ job.location or '' }}">{{ job.location or "-" }}</td>
-                    <td class="utc-time" data-utc="{{ job.date_time or '' }}">{{ job.date_time or "-" }}</td>
-                    <td>{{ job.seniority_level or "-" }}</td>
-                    <td>{{ job.applicant_count if job.applicant_count is not none else "-" }}</td>
-                    <td>{{ job.total_matches if job.total_matches is not none else "-" }}</td>
-                    <td>{{ "%.1f"|format(job.weighted_score) if job.weighted_score is not none else "-" }}</td>
-                    <td>{{ "%.1f"|format(job.match_percentage) ~ "%" if job.match_percentage is not none else "-" }}</td>
-                    <td>
-                        {% if job.apply_type == 'easy_apply' %}
-                        <span class="apply-badge">Easy Apply</span>
-                        {% elif job.apply_type == 'external' and job.apply_url and job.apply_url.startswith(('http://', 'https://')) %}
-                        <a href="{{ job.apply_url }}" target="_blank" rel="noopener noreferrer">External</a>
-                        {% elif job.apply_type == 'external' %}
-                        External
-                        {% else %}-{% endif %}
-                    </td>
-                    <td>
-                        {% if job.linkedin_job_id %}
-                        <a href="https://www.linkedin.com/jobs/view/{{ job.linkedin_job_id }}/" target="_blank" rel="noopener">View</a>
-                        {% else %}-{% endif %}
-                    </td>
-                    <td>
-                        <button type="button" class="block-btn" data-company="{{ job.company or '' }}">Block</button>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </figure>
+    <table class="jobs" id="jobTable">
+        <thead>
+            <tr>
+                <th aria-label="Details"></th>
+                <th>{{ sort_link('title', 'Title') }}<span class="sep">/</span>{{ sort_link('company', 'Company') }}</th>
+                {{ sort_th('location', 'Location', cls='col-opt') }}
+                {{ sort_th('date_time', 'Posted', 'desc') }}
+                {{ sort_th('applicant_count', 'Appl.') }}
+                {{ sort_th('weighted_score', 'Score', 'desc') }}
+                {{ sort_th('match_percentage', 'Match', 'desc', cls='col-opt') }}
+                <th>Keywords</th>
+                <th>Apply</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in jobs %}
+            {% set job_id = job.linkedin_job_id %}
+            {% set app_info = applications.get(job_id) %}
+            {% set kws = (job.matched_keywords or '').split(',')|select|list %}
+            {% set appl = applicants_label(job) %}
+            <tr class="{{ 'blacklisted' if job.company in blacklisted }}">
+                <td><button type="button" class="toggle" aria-expanded="false" aria-controls="details-{{ job_id }}"
+                            aria-label="Show details">&#9656;</button></td>
+                <td class="job-cell">
+                    <span class="job-title" title="{{ job.title or '' }}">{{ job.title or "-" }}</span>
+                    <span class="job-company" title="{{ job.company or '' }}">{{ job.company or "-" }}</span>
+                </td>
+                <td class="location col-opt" title="{{ job.location or '' }}">{{ job.location or "-" }}</td>
+                <td class="nowrap utc-time" data-utc="{{ job.date_time or '' }}">{{ job.date_time[:10] if job.date_time else "-" }}</td>
+                <td class="nowrap {{ 'applicants-under' if appl.startswith('<') }}">{{ appl }}</td>
+                <td><span class="score score-{{ score_badge(job.weighted_score) }}">{{ "%.1f"|format(job.weighted_score) if job.weighted_score is not none else "-" }}</span></td>
+                <td class="nowrap col-opt">{{ "%.0f"|format(job.match_percentage) ~ "%" if job.match_percentage is not none else "-" }}</td>
+                <td class="keywords" title="{{ kws|join(', ') }}">
+                    {% for kw in kws[:5] %}<span class="kw">{{ kw }}</span>{% endfor %}
+                    {% if kws|length > 5 %}<span class="kw-more">+{{ kws|length - 5 }} more</span>{% endif %}
+                    {% if not kws %}-{% endif %}
+                </td>
+                <td class="nowrap">
+                    {% if job.apply_type == 'easy_apply' %}
+                    <span class="apply-badge">Easy Apply</span>
+                    {% elif job.apply_type == 'external' and job.apply_url and job.apply_url.startswith(('http://', 'https://')) %}
+                    <a href="{{ job.apply_url }}" target="_blank" rel="noopener noreferrer">External</a>
+                    {% elif job.apply_type == 'external' %}
+                    External
+                    {% else %}-{% endif %}
+                </td>
+                <td class="actions">
+                    {% if job_id %}<a href="https://www.linkedin.com/jobs/view/{{ job_id }}/" target="_blank" rel="noopener">View</a>{% endif %}
+                    {% if app_info and not app_info.similar %}
+                    <button type="button" class="mini applied app-btn" data-job-id="{{ job_id }}" data-title="{{ job.title or '' }}"
+                            data-applied-on="{{ app_info.applied_on }}" data-notes="{{ app_info.notes or '' }}"
+                            title="Applied on {{ app_info.applied_on }}{{ ': ' ~ app_info.notes if app_info.notes }}">✓ Applied</button>
+                    {% elif app_info %}
+                    <button type="button" class="mini similar app-btn" data-job-id="{{ job_id }}" data-title="{{ job.title or '' }}"
+                            title="Applied on {{ app_info.applied_on }} to a posting with the same title and company">✓ Similar</button>
+                    {% else %}
+                    <button type="button" class="mini app-btn" data-job-id="{{ job_id }}" data-title="{{ job.title or '' }}"
+                            title="Mark as applied">+ Applied</button>
+                    {% endif %}
+                    <button type="button" class="mini block-btn" data-company="{{ job.company or '' }}" title="Blacklist this company">Block</button>
+                </td>
+            </tr>
+            <tr class="details" id="details-{{ job_id }}" hidden>
+                <td></td>
+                <td colspan="9">
+                    <dl>
+                        <div><dt>Seniority</dt><dd>{{ job.seniority_level or "-" }}</dd></div>
+                        <div><dt>Employment</dt><dd>{{ job.employment_type or "-" }}</dd></div>
+                        <div><dt>Industries</dt><dd>{{ job.industries or "-" }}</dd></div>
+                        <div><dt>Location</dt><dd>{{ job.location or "-" }}</dd></div>
+                        <div><dt>Match</dt><dd>{{ "%.1f"|format(job.match_percentage) ~ "%" if job.match_percentage is not none else "-" }}
+                            ({{ job.total_matches if job.total_matches is not none else 0 }} keywords)</dd></div>
+                        <div><dt>ID</dt><dd><code>{{ job_id }}</code></dd></div>
+                        {% if app_info %}
+                        <div><dt>Applied</dt><dd>{{ app_info.applied_on }}{{ ' (similar posting)' if app_info.similar }}{{ ' — ' ~ app_info.notes if app_info.notes }}</dd></div>
+                        {% endif %}
+                    </dl>
+                    {% if kws|length > 5 %}<p class="muted">Keywords: {{ kws|join(', ') }}</p>{% endif %}
+                    {% set snippet = snippets.get(job_id) %}
+                    {% if snippet %}
+                    <p class="snippet">{{ snippet }}{% if snippet|length >= 500 %}…{% endif %}</p>
+                    {% else %}
+                    <p class="snippet muted">No description stored.</p>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
     {{ pager() }}
     {% elif total == 0 and stats.total_analyzed %}
     <p>No jobs match the current filters.</p>
@@ -229,18 +410,71 @@
     <p>No jobs found. Run the scraper first with <code>python main.py</code>, then analyze with <code>analyze_keywords()</code>.</p>
     {% endif %}
 
+    <dialog id="applyDialog">
+        <article>
+            <header>
+                <button type="button" aria-label="Close" rel="prev" data-close></button>
+                <strong>Mark as applied</strong>
+                <p id="applyJobTitle" class="muted" style="margin:0"></p>
+            </header>
+            <label>
+                Applied on
+                <input type="date" id="applyDate" required>
+            </label>
+            <label>
+                Notes (optional)
+                <textarea id="applyNotes" rows="3" maxlength="2000"></textarea>
+            </label>
+            <p class="error" id="applyError" hidden></p>
+            <footer>
+                <button type="button" class="secondary outline" id="applyRemove">Remove</button>
+                <button type="button" class="secondary" data-close>Cancel</button>
+                <button type="button" id="applySave">Save</button>
+            </footer>
+        </article>
+    </dialog>
+
     <script>
     document.addEventListener("DOMContentLoaded", function() {
-        // Convert UTC timestamps to local timezone
+        // UTC timestamps → relative time ("3h ago"), exact local time on hover
+        function relativeTime(date, now) {
+            var seconds = Math.round((now - date) / 1000);
+            if (seconds < 60) return "just now";
+            if (seconds < 3600) return Math.floor(seconds / 60) + "m ago";
+            if (seconds < 86400) return Math.floor(seconds / 3600) + "h ago";
+            if (seconds < 30 * 86400) return Math.floor(seconds / 86400) + "d ago";
+            return date.toLocaleDateString(undefined, {year: "numeric", month: "short", day: "numeric"});
+        }
+        var now = new Date();
         document.querySelectorAll(".utc-time").forEach(function(td) {
             var utc = td.dataset.utc;
             if (!utc || utc === "-") return;
             if (!utc.endsWith("Z") && !utc.includes("+")) utc += "Z";
             var date = new Date(utc);
             if (isNaN(date)) return;
-            td.textContent = date.toLocaleString(undefined, {
+            td.textContent = relativeTime(date, now);
+            td.title = date.toLocaleString(undefined, {
                 year: "numeric", month: "short", day: "numeric",
                 hour: "2-digit", minute: "2-digit"
+            });
+        });
+
+        // Multi-select dropdowns submit when closed, if something changed
+        document.querySelectorAll("details[data-multi]").forEach(function(details) {
+            var initial = null;
+            function state() {
+                return Array.prototype.map.call(details.querySelectorAll("input:checked"),
+                                                function(i) { return i.value; }).join("\n");
+            }
+            details.addEventListener("toggle", function() {
+                if (details.open) { initial = state(); return; }
+                if (initial !== null && state() !== initial) details.closest("form").submit();
+            });
+        });
+        // Close an open dropdown when clicking elsewhere
+        document.addEventListener("click", function(e) {
+            document.querySelectorAll("details[data-multi][open]").forEach(function(details) {
+                if (!details.contains(e.target)) details.open = false;
             });
         });
 
@@ -283,10 +517,78 @@
             var tag = e.target.closest(".blacklist-tag");
             if (tag) removeFromBlacklist(tag.dataset.company);
         });
+
+        // Application dialog; changes affect the "Applied" filter, so reload too
+        var dialog = document.getElementById("applyDialog");
+        var applyDate = document.getElementById("applyDate");
+        var applyNotes = document.getElementById("applyNotes");
+        var applyError = document.getElementById("applyError");
+        var applyRemove = document.getElementById("applyRemove");
+        var currentJobId = null;
+
+        function localToday() {
+            var d = new Date();
+            d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+            return d.toISOString().slice(0, 10);
+        }
+
+        function openApplyDialog(btn) {
+            currentJobId = btn.dataset.jobId;
+            var isApplied = btn.classList.contains("applied");
+            document.getElementById("applyJobTitle").textContent = btn.dataset.title || currentJobId;
+            applyDate.value = btn.dataset.appliedOn || localToday();
+            applyNotes.value = btn.dataset.notes || "";
+            applyRemove.hidden = !isApplied;
+            applyError.hidden = true;
+            dialog.showModal();
+        }
+
+        function applicationRequest(method, body) {
+            fetch("/api/applications", {
+                method: method,
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify(body)
+            }).then(function(r) {
+                if (r.ok) { window.location.reload(); return; }
+                return r.json().then(function(data) {
+                    applyError.textContent = data.error || "Request failed";
+                    applyError.hidden = false;
+                });
+            }).catch(function() {
+                applyError.textContent = "Request failed";
+                applyError.hidden = false;
+            });
+        }
+
+        document.getElementById("applySave").addEventListener("click", function() {
+            if (!applyDate.value) { applyDate.focus(); return; }
+            applicationRequest("POST", {linkedin_job_id: currentJobId,
+                                        applied_on: applyDate.value, notes: applyNotes.value});
+        });
+        applyRemove.addEventListener("click", function() {
+            applicationRequest("DELETE", {linkedin_job_id: currentJobId});
+        });
+        dialog.querySelectorAll("[data-close]").forEach(function(btn) {
+            btn.addEventListener("click", function() { dialog.close(); });
+        });
+        dialog.addEventListener("click", function(e) {
+            if (e.target === dialog) dialog.close();   // backdrop click
+        });
+
         if (table) {
             table.addEventListener("click", function(e) {
-                if (!e.target.classList.contains("block-btn")) return;
-                addToBlacklist(e.target.dataset.company);
+                var target = e.target;
+                if (target.classList.contains("block-btn")) {
+                    addToBlacklist(target.dataset.company);
+                } else if (target.classList.contains("app-btn")) {
+                    openApplyDialog(target);
+                } else if (target.classList.contains("toggle")) {
+                    var row = document.getElementById(target.getAttribute("aria-controls"));
+                    var expanded = target.getAttribute("aria-expanded") === "true";
+                    target.setAttribute("aria-expanded", expanded ? "false" : "true");
+                    target.setAttribute("aria-label", expanded ? "Show details" : "Hide details");
+                    row.hidden = expanded;
+                }
             });
         }
     });
