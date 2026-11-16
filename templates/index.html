@@ -283,7 +283,7 @@
                        onchange="this.form.submit()">
                 Hide aggregators
             </label>
-            <label title="Hides seniority: {{ above_levels|join(', ') }}. Unknown and Not Applicable are kept.">
+            <label title="Hides seniority: {{ above_levels|join(', ') }}, and titles with Senior, Sr, Lead, Director, Head, Staff, Principal, Architect, Manager (or Spanish equivalents) unless they also say Jr/Ssr.">
                 <input type="hidden" name="hide_above_level" value="0">
                 <input type="checkbox" name="hide_above_level" value="1" {% if hide_above_level %}checked{% endif %}
                        onchange="this.form.submit()">

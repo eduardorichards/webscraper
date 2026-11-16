@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from config.env import DB_PATH
 from config.settings import TARGET_SENIORITY_LEVELS
 from utils.aggregators import load_aggregators
-from utils.seniority import levels_above
+from utils.seniority import levels_above, title_above_level
 from utils.time_utils import utc_now_iso
 
 LINKEDIN_JOB_BASE_URL = "https://www.linkedin.com/jobs/view/"
@@ -692,12 +692,15 @@ class SQLiteStorage:
                 "(SELECT company FROM aggregator_companies))"
             )
 
-        # NULL and unranked values ("Not Applicable") are always kept
-        if hide_above_level and self.ABOVE_TARGET_LEVELS:
-            placeholders = ", ".join("?" * len(self.ABOVE_TARGET_LEVELS))
-            clauses.append(
-                f"(seniority_level IS NULL OR seniority_level NOT IN ({placeholders}))")
-            params.extend(self.ABOVE_TARGET_LEVELS)
+        # NULL and unranked values ("Not Applicable") are always kept by the
+        # seniority check; the title check (see _connect_summary) still applies
+        if hide_above_level:
+            if self.ABOVE_TARGET_LEVELS:
+                placeholders = ", ".join("?" * len(self.ABOVE_TARGET_LEVELS))
+                clauses.append(
+                    f"(seniority_level IS NULL OR seniority_level NOT IN ({placeholders}))")
+                params.extend(self.ABOVE_TARGET_LEVELS)
+            clauses.append("NOT title_above_level(title)")
 
         if applied == 'hide':
             clauses.append(f"NOT {self._APPLIED_SQL}")
@@ -705,6 +708,14 @@ class SQLiteStorage:
             clauses.append(self._APPLIED_SQL)
 
         return " WHERE " + " AND ".join(clauses), params
+
+    def _connect_summary(self):
+        """Connection for summary queries, with the SQL functions they use."""
+        conn = sqlite3.connect(self.db_file)
+        conn.create_function("title_above_level", 1,
+                             lambda title: int(title_above_level(title)),
+                             deterministic=True)
+        return conn
 
     def get_job_summary(self, limit=None, unique=False, page=1, per_page=50,
                         sort=DEFAULT_SORT, direction=DEFAULT_DIRECTION,
@@ -715,7 +726,7 @@ class SQLiteStorage:
         to 7). per_page=None disables pagination (all matching rows, or
         `limit`). Invalid sort/direction values fall back to date_time DESC.
         """
-        conn = sqlite3.connect(self.db_file)
+        conn = self._connect_summary()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
 
@@ -748,7 +759,7 @@ class SQLiteStorage:
 
     def count_job_summary(self, unique=False, **filters):
         """Count rows of the job summary view matching the given filters."""
-        conn = sqlite3.connect(self.db_file)
+        conn = self._connect_summary()
         cursor = conn.cursor()
 
         view_name = "job_summary_unique" if unique else "job_summary"

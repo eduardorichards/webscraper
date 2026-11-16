@@ -204,6 +204,11 @@ main.py → analyze_keywords(since=<pipeline start>)
   `hide_above_level` filter hides those. NULL, "Not Applicable" and unknown values are never
   hidden. Computed at query time, nothing stored or deleted. An unknown target name raises
   `ValueError` at import.
+- The same filter also hides by title (`title_above_level()`, registered as a SQLite function
+  in `SQLiteStorage._connect_summary()`): whole-word, case-insensitive match of
+  `ABOVE_LEVEL_TITLE_TERMS` (Senior/Sr/Lead/Director/Head/Staff/Principal/Architect/Manager
+  and Spanish equivalents), unless the title also matches `TARGET_LEVEL_TITLE_TERMS`
+  (Jr/Junior/Ssr/Semi-senior/Trainee/Intern/Pasante). Applies to the web UI and `/api/shortlist`.
 
 ### Aggregators (`config/aggregators.json`)
 - Hand-checked list from the market analysis: `categories` (`job_board`,

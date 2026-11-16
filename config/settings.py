@@ -50,6 +50,21 @@ SENIORITY_ORDER = [EXPERIENCE_LEVELS[level] for level in sorted(EXPERIENCE_LEVEL
 # values ("Not Applicable", NULL) are never hidden.
 TARGET_SENIORITY_LEVELS = ["Internship", "Entry level", "Associate"]
 
+# The same filter also checks the title, since seniority_level is often "Not
+# Applicable" on senior postings. Regex fragments, matched case-insensitively
+# as whole words (English, Spanish, and Portuguese spellings of Senior).
+ABOVE_LEVEL_TITLE_TERMS = [
+    r"s[eéê]nior", r"sr", r"lead", r"leader", r"l[ií]der", r"directora?",
+    r"head", r"staff", r"principal", r"architect", r"arquitect[oa]",
+    r"manager", r"gerente", r"jef[ea]",
+]
+# A title naming one of these is never hidden, even if it also has an
+# above-level term ("QA Automatizador SSR o SR", "Developer Jr/Ssr/Sr")
+TARGET_LEVEL_TITLE_TERMS = [
+    r"j[uú]nior", r"jr", r"semi[\s-]?s[eé]nior", r"ssr", r"trainee",
+    r"intern", r"internship", r"pasante",
+]
+
 # Valid experience level range
 MIN_EXPERIENCE_LEVEL = 1
 MAX_EXPERIENCE_LEVEL = 6

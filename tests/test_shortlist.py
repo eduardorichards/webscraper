@@ -137,6 +137,22 @@ class TestShortlist(unittest.TestCase):
         self.assertEqual(data['count'], 2)
         self.assertEqual(data['params']['limit'], 2)
 
+    def test_above_level_title_hidden(self):
+        # seniority_level says nothing, the title does
+        conn = sqlite3.connect(self.db_path)
+        for job_id, title in (('4000000014', 'Lead Engineer, DevOps Platform'),
+                              ('4000000015', 'QA Automatizador SSR o SR')):
+            conn.execute("INSERT INTO job_searches (linkedin_job_id, title, company)"
+                         " VALUES (?, ?, 'Bain')", (job_id, title))
+            conn.execute("INSERT INTO job_posts (linkedin_job_id, date_time, weighted_score,"
+                         " seniority_level, apply_type)"
+                         " VALUES (?, ?, 85.0, 'Not Applicable', 'external')",
+                         (job_id, _ago(minutes=5)))
+        conn.commit()
+        conn.close()
+        self.assertEqual(self._ids(self._get()),
+                         ['4000000015', '4000000002', '4000000001', '4000000003'])
+
     def test_apply_easy_apply(self):
         self.assertEqual(self._ids(self._get('?apply=easy_apply')), ['4000000006'])
 
