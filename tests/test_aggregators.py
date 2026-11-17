@@ -30,7 +30,7 @@ class TestDataFile(unittest.TestCase):
         entries = load_aggregators()
         companies = [c for c, _, _ in entries]
         self.assertIn("Quik Hire Staffing", companies)
-        self.assertEqual(len(companies), 23)
+        self.assertEqual(len(companies), 24)
         self.assertEqual(AGGREGATORS_FILE, PROJECT_ROOT / "config" / "aggregators.json")
         self.assertEqual({cat for _, cat, _ in entries},
                          {"job_board", "talent_marketplace", "mass_reposter"})

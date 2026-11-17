@@ -262,7 +262,7 @@ print(f"Unique locations: {stats['unique_locations']}")
 | Param | Default | Accepted values |
 |---|---|---|
 | `since` | `2h` | `<N>h` or `<N>d` (1h to 365d): `date_time` (when the job was analyzed) within that window |
-| `min_score` | `25` | number >= 0 |
+| `min_score` | `29` | number >= 0 |
 | `limit` | `10` | integer 1–100 |
 | `apply` | `external` | `external`, `easy_apply` or `all` (`all` includes unknown apply type) |
 

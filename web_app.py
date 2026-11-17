@@ -341,7 +341,7 @@ def api_applications_remove():
     return jsonify({"status": "ok", "linkedin_job_id": job_id})
 
 
-SHORTLIST_DEFAULTS = {"since": "2h", "min_score": 25.0, "limit": 10, "apply": "external"}
+SHORTLIST_DEFAULTS = {"since": "2h", "min_score": 29.0, "limit": 10, "apply": "external"}
 SHORTLIST_MAX_LIMIT = 100
 SHORTLIST_MAX_SINCE_HOURS = 24 * 365
 SHORTLIST_APPLY_OPTIONS = ("external", "easy_apply", "all")

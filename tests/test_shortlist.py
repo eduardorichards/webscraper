@@ -24,6 +24,9 @@ JOBS = [
     ('4000000002', 'Python Dev', 'Globex', dict(minutes=70), 80.0, 'external', None),
     ('4000000003', 'Data Dev', 'Initech', dict(minutes=90), 30.0, 'external', 'Associate'),
     ('4000000004', 'Low Score', 'Hooli', dict(minutes=10), 20.0, 'external', 'Entry level'),
+    # Above the old default min_score (25), below the current one (29)
+    ('4000000030', 'Just Below', 'Cyberdyne', dict(minutes=15), 27.0, 'external',
+     'Entry level'),
     ('4000000005', 'Old Job', 'Umbrella', dict(hours=5), 90.0, 'external', 'Entry level'),
     ('4000000006', 'Easy Job', 'Stark', dict(minutes=20), 70.0, 'easy_apply', 'Entry level'),
     ('4000000007', 'Unknown Job', 'Wayne', dict(minutes=20), 60.0, None, 'Entry level'),
@@ -93,7 +96,7 @@ class TestShortlist(unittest.TestCase):
         # Excluded: low score, too old, easy apply, unknown apply type,
         # blacklisted, aggregator, above my level, applied and its twin
         self.assertEqual(self._ids(data), ['4000000002', '4000000001', '4000000003'])
-        self.assertEqual(data['params'], {'since': '2h', 'min_score': 25.0, 'limit': 10,
+        self.assertEqual(data['params'], {'since': '2h', 'min_score': 29.0, 'limit': 10,
                                           'apply': 'external'})
         self.assertEqual(data['total'], 3)
         self.assertEqual(data['count'], 3)
@@ -180,7 +183,7 @@ class TestShortlist(unittest.TestCase):
 
     def test_empty_params_use_defaults(self):
         data = self._get('?since=&min_score=&limit=&apply=')
-        self.assertEqual(data['params'], {'since': '2h', 'min_score': 25.0, 'limit': 10,
+        self.assertEqual(data['params'], {'since': '2h', 'min_score': 29.0, 'limit': 10,
                                           'apply': 'external'})
 
     def test_invalid_params(self):

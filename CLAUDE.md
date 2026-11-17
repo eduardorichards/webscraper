@@ -507,7 +507,8 @@ Exception: `applications.applied_on` is a plain `YYYY-MM-DD` local date.
 - Applicants: `<25` for `under` and for historical `25` + NULL; `>200` for `over`.
 - `GET /api/shortlist` (`api_shortlist()`): JSON of the best jobs to apply to now. Params:
   `since` (`<N>h`/`<N>d`, 1h–365d, default `2h`; maps to the `hours`/`days` filter),
-  `min_score` (≥ 0, default 25), `limit` (1–100, default 10), `apply`
+  `min_score` (≥ 0, default 29; keeps the 14-day shortlist size of
+  the pre-cap default 25), `limit` (1–100, default 10), `apply`
   (`external` default / `easy_apply` / `all`). Empty = default; any invalid value → 400 with
   `{"error", "invalid": {param: message}}`. Fixed: `hide_blacklisted`, `hide_aggregators`,
   `hide_above_level`, `applied='hide'`; `job_summary_unique` sorted by `weighted_score` desc.

@@ -28,6 +28,7 @@
     {"company": "Turing", "category": "talent_marketplace", "reason": "freelance talent marketplace; 10 IDs/title"},
     {"company": "TalentPop App", "category": "talent_marketplace", "reason": "talent marketplace; 16 IDs/title"},
     {"company": "FullStack", "category": "mass_reposter", "reason": "mass reposter: 28 IDs/title across 111 locations"},
-    {"company": "Bluelight", "category": "mass_reposter", "reason": "mass reposter: 34 IDs/title across 99 locations"}
+    {"company": "Bluelight", "category": "mass_reposter", "reason": "mass reposter: 34 IDs/title across 99 locations"},
+    {"company": "Grid Dynamics Careers", "category": "mass_reposter", "reason": "\"positions in <city>\" multi-role reposts (keyword-stuffed); the employer's own \"Grid Dynamics\" postings are not listed"}
   ]
 }
