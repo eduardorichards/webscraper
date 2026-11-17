@@ -238,6 +238,24 @@ class TestMigrations(unittest.TestCase):
         self._open_storage()
         self.assertEqual(self._query("SELECT * FROM applications"), snapshot)
 
+    def test_schedule_tables_added_to_legacy_db_and_survive_reinit(self):
+        self._create_legacy_db()
+        storage = self._open_storage()
+        self.assertEqual(self._columns('schedule_runs'),
+                         ['id', 'name', 'started_at', 'window_from', 'finished_at',
+                          'status', 'summary'])
+        self.assertEqual(self._columns('job_reviews'),
+                         ['linkedin_job_id', 'status', 'reason', 'run_id', 'reviewed_at',
+                          'updated_at'])
+        run = storage.start_schedule_run('apply')
+        storage.save_job_review('100', 'skipped', 'closed', run['id'])
+        storage.finish_schedule_run(run['id'], 'completed')
+        runs = self._query("SELECT * FROM schedule_runs")
+        reviews = self._query("SELECT * FROM job_reviews")
+        self._open_storage()
+        self.assertEqual(self._query("SELECT * FROM schedule_runs"), runs)
+        self.assertEqual(self._query("SELECT * FROM job_reviews"), reviews)
+
     def test_views_still_work_after_migration(self):
         self._create_legacy_db()
         storage = self._open_storage()

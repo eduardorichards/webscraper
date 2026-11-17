@@ -152,6 +152,37 @@ class SQLiteStorage:
         )
         """)
 
+        # Table 8: One row per execution of a scheduled application run
+        # (the Claude "apply" schedule). window_from is the checkpoint the run
+        # started from: started_at of the last completed run of the same name.
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS schedule_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            window_from TEXT,
+            finished_at TEXT,
+            status TEXT NOT NULL DEFAULT 'running'
+                CHECK (status IN ('running', 'completed', 'interrupted', 'failed')),
+            summary TEXT
+        )
+        """)
+
+        # Table 9: Latest review outcome per job (one row per job key), so a
+        # later run doesn't open the same posting again. Jobs with status
+        # 'partial' / 'unprocessed' are retried (see REVIEW_RETRY_STATUSES).
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS job_reviews (
+            linkedin_job_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL
+                CHECK (status IN ('ready', 'partial', 'skipped', 'blocked', 'unprocessed')),
+            reason TEXT,
+            run_id INTEGER REFERENCES schedule_runs(id),
+            reviewed_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """)
+
         # Migrations: columns added after the first release. Existing rows
         # keep NULL (ADD COLUMN does not rewrite the table).
         self._add_column_if_missing(cursor, 'job_searches', 'scraped_at', 'TEXT')
@@ -211,6 +242,14 @@ class SQLiteStorage:
         cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_job_posts_employment_type
         ON job_posts(employment_type)
+        """)
+        cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_schedule_runs_name_started
+        ON schedule_runs(name, started_at)
+        """)
+        cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_job_reviews_run
+        ON job_reviews(run_id)
         """)
 
         # View: combined job data for display. date_time is the source's
@@ -710,6 +749,12 @@ class SQLiteStorage:
     SOURCE_FILTERS = SOURCES
     # seniority_level values hidden by hide_above_level (from config.settings)
     ABOVE_TARGET_LEVELS = levels_above(TARGET_SENIORITY_LEVELS)
+    # Review outcomes of a scheduled run (job_reviews.status). The retry
+    # statuses stay visible to hide_reviewed: the job still needs work.
+    REVIEW_STATUSES = ('ready', 'partial', 'skipped', 'blocked', 'unprocessed')
+    REVIEW_RETRY_STATUSES = ('partial', 'unprocessed')
+    # How a scheduled run can end (schedule_runs.status, besides 'running')
+    RUN_END_STATUSES = ('completed', 'interrupted', 'failed')
 
     # Row of the summary view `v` is an applied job or a (title, company) twin
     # of one. IFNULL: rows with a NULL title/company count as not applied.
@@ -738,11 +783,13 @@ class SQLiteStorage:
                                hide_above_level=False, search=None,
                                employment_types=None, max_score=None,
                                min_match=None, keywords=None, under_25=False,
-                               applied='all', source=None):
+                               applied='all', source=None, hide_reviewed=False):
         """Build the WHERE clause and bound params shared by summary queries.
 
         The view must be aliased `v`. List filters (employment_types,
         keywords) match any of their values; an empty list is no filter.
+        hide_reviewed hides jobs a scheduled run already finished with
+        (job_reviews status not in REVIEW_RETRY_STATUSES).
         """
         clauses = ["weighted_score >= ?"]
         params = [min_score]
@@ -826,6 +873,13 @@ class SQLiteStorage:
             clauses.append(f"NOT {self._APPLIED_SQL}")
         elif applied == 'only':
             clauses.append(self._APPLIED_SQL)
+
+        if hide_reviewed:
+            placeholders = ", ".join("?" * len(self.REVIEW_RETRY_STATUSES))
+            clauses.append(
+                "v.linkedin_job_id NOT IN (SELECT linkedin_job_id FROM job_reviews"
+                f" WHERE status NOT IN ({placeholders}))")
+            params.extend(self.REVIEW_RETRY_STATUSES)
 
         return " WHERE " + " AND ".join(clauses), params
 
@@ -1051,3 +1105,153 @@ class SQLiteStorage:
                 status[job_id] = {'applied_on': pairs[(job['title'], job['company'])],
                                   'notes': None, 'similar': True}
         return status
+
+    # ------------------------------------------------------------------
+    # Scheduled application runs: run log + per-job review outcomes
+    # ------------------------------------------------------------------
+
+    def start_schedule_run(self, name, window_from=None):
+        """Open a run and return its row (dict).
+
+        window_from defaults to started_at of the last *completed* run with
+        the same name (NULL on the first one): the checkpoint. It is the
+        start of that run, not its end, because that run only saw the jobs
+        that existed when it began. Interrupted or failed runs don't advance
+        the checkpoint (their per-job reviews still do their part). Any run
+        of the same name still 'running' is closed as 'interrupted': runs
+        are sequential, so it must have died.
+        """
+        now = utc_now_iso()
+        conn = sqlite3.connect(self.db_file)
+        try:
+            conn.execute(
+                "UPDATE schedule_runs SET status = 'interrupted', finished_at = ?"
+                " WHERE name = ? AND status = 'running'", (now, name))
+            if window_from is None:
+                row = conn.execute(
+                    "SELECT MAX(started_at) FROM schedule_runs"
+                    " WHERE name = ? AND status = 'completed'", (name,)).fetchone()
+                window_from = row[0]
+            cursor = conn.execute(
+                "INSERT INTO schedule_runs (name, started_at, window_from, status)"
+                " VALUES (?, ?, ?, 'running')", (name, now, window_from))
+            run_id = cursor.lastrowid
+            conn.commit()
+        finally:
+            conn.close()
+        return self.get_schedule_run(run_id)
+
+    def finish_schedule_run(self, run_id, status, summary=None):
+        """Close a run with 'completed' / 'interrupted' / 'failed'.
+
+        Returns the updated row, or None if the run doesn't exist.
+        """
+        if status not in self.RUN_END_STATUSES:
+            raise ValueError("invalid run status: %r" % (status,))
+        conn = sqlite3.connect(self.db_file)
+        try:
+            cursor = conn.execute(
+                "UPDATE schedule_runs SET status = ?, finished_at = ?, summary = ?"
+                " WHERE id = ?", (status, utc_now_iso(), summary, run_id))
+            conn.commit()
+            if cursor.rowcount == 0:
+                return None
+        finally:
+            conn.close()
+        return self.get_schedule_run(run_id)
+
+    def get_schedule_run(self, run_id):
+        """One run as a dict with its review counts, or None."""
+        runs = self._schedule_runs("WHERE id = ?", (run_id,))
+        return runs[0] if runs else None
+
+    def list_schedule_runs(self, name=None, limit=20):
+        """Runs, newest first, each with `counts` = {review status: jobs}."""
+        if name:
+            return self._schedule_runs("WHERE name = ?", (name,), limit)
+        return self._schedule_runs("", (), limit)
+
+    def _schedule_runs(self, where, params, limit=None):
+        conn = sqlite3.connect(self.db_file)
+        conn.row_factory = sqlite3.Row
+        try:
+            query = ("SELECT id, name, started_at, window_from, finished_at, status,"
+                     " summary FROM schedule_runs " + where +
+                     " ORDER BY started_at DESC, id DESC")
+            query_params = list(params)
+            if limit is not None:
+                query += " LIMIT ?"
+                query_params.append(int(limit))
+            runs = [dict(r) for r in conn.execute(query, query_params)]
+            counts = {}
+            if runs:
+                placeholders = ", ".join("?" * len(runs))
+                for run_id, status, n in conn.execute(
+                        "SELECT run_id, status, COUNT(*) FROM job_reviews"
+                        f" WHERE run_id IN ({placeholders}) GROUP BY run_id, status",
+                        [r['id'] for r in runs]):
+                    counts.setdefault(run_id, {})[status] = n
+        finally:
+            conn.close()
+        for run in runs:
+            run['counts'] = counts.get(run['id'], {})
+        return runs
+
+    def schedule_run_exists(self, run_id):
+        conn = sqlite3.connect(self.db_file)
+        row = conn.execute("SELECT 1 FROM schedule_runs WHERE id = ?",
+                           (run_id,)).fetchone()
+        conn.close()
+        return row is not None
+
+    def save_job_review(self, linkedin_job_id, status, reason=None, run_id=None):
+        """Record the outcome of reviewing a job (upsert, latest wins).
+
+        reviewed_at is when the job was first reviewed; updated_at changes on
+        every save.
+        """
+        if status not in self.REVIEW_STATUSES:
+            raise ValueError("invalid review status: %r" % (status,))
+        now = utc_now_iso()
+        conn = sqlite3.connect(self.db_file)
+        try:
+            conn.execute("""
+                INSERT INTO job_reviews
+                    (linkedin_job_id, status, reason, run_id, reviewed_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(linkedin_job_id) DO UPDATE SET
+                    status = excluded.status,
+                    reason = excluded.reason,
+                    run_id = excluded.run_id,
+                    updated_at = excluded.updated_at
+            """, (linkedin_job_id, status, reason, run_id, now, now))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def remove_job_review(self, linkedin_job_id):
+        """Forget a job's review so it can show up in the shortlist again."""
+        conn = sqlite3.connect(self.db_file)
+        conn.execute("DELETE FROM job_reviews WHERE linkedin_job_id = ?",
+                     (linkedin_job_id,))
+        conn.commit()
+        conn.close()
+
+    def get_job_reviews(self, run_id=None, status=None, limit=100):
+        """Reviews, most recently updated first."""
+        clauses, params = [], []
+        if run_id is not None:
+            clauses.append("run_id = ?")
+            params.append(run_id)
+        if status is not None:
+            clauses.append("status = ?")
+            params.append(status)
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        conn = sqlite3.connect(self.db_file)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT linkedin_job_id, status, reason, run_id, reviewed_at, updated_at"
+            f" FROM job_reviews{where} ORDER BY updated_at DESC, linkedin_job_id"
+            " LIMIT ?", params + [int(limit)]).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]

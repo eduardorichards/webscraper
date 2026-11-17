@@ -1,6 +1,6 @@
 import math
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from flask import Flask, render_template, request, jsonify, url_for
 from config import env
@@ -22,6 +22,10 @@ KEYWORD_OPTIONS = list(dict.fromkeys(DEFAULT_KEYWORDS))
 MAX_SEARCH_LENGTH = 100
 MAX_LIST_VALUES = 20
 MAX_NOTES_LENGTH = 2000
+MAX_REASON_LENGTH = 500
+MAX_RUN_NAME_LENGTH = 50
+DEFAULT_RUN_NAME = "apply"
+MAX_LIST_LIMIT = 100
 # (min score, badge class), highest first; below the last one → "low".
 # From the score distribution of ~100k scored jobs (2026-11-14 local copy):
 # median 10, p75 25, p90 47.
@@ -366,7 +370,157 @@ def api_applications_remove():
     return jsonify({"status": "ok", "linkedin_job_id": job_id})
 
 
-SHORTLIST_DEFAULTS = {"since": "2h", "min_score": 29.0, "limit": 10, "apply": "external"}
+def _utc_timestamp(value):
+    """True if value is a stored-format UTC timestamp (2026-11-17T20:15:00Z)."""
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _suggested_since(window_from):
+    """'<N>h' covering window_from → now plus 1 h of margin; None if no checkpoint.
+
+    Meant for /api/shortlist's `since` (capped at its maximum). With
+    exclude_reviewed the margin costs nothing: reviewed jobs are dropped.
+    """
+    if not window_from:
+        return None
+    start = datetime.strptime(window_from, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    seconds = (datetime.now(timezone.utc) - start).total_seconds()
+    hours = max(1, math.ceil(seconds / 3600) + 1)
+    return "%dh" % min(hours, SHORTLIST_MAX_SINCE_HOURS)
+
+
+def _limit_arg(default=20):
+    """?limit= for the list endpoints: 1-MAX_LIST_LIMIT, else (None, error)."""
+    raw = request.args.get("limit", "").strip()
+    if not raw:
+        return default, None
+    try:
+        limit = int(raw)
+        if not 1 <= limit <= MAX_LIST_LIMIT:
+            raise ValueError
+    except ValueError:
+        return None, (jsonify({"error": "limit must be an integer between 1 and %d"
+                                        % MAX_LIST_LIMIT}), 400)
+    return limit, None
+
+
+@app.route("/api/schedule-runs", methods=["GET"])
+def api_schedule_runs_list():
+    """Runs of the application schedule, newest first, with review counts."""
+    limit, error = _limit_arg()
+    if error:
+        return error
+    name = request.args.get("name", "").strip() or None
+    return jsonify(SQLiteStorage().list_schedule_runs(name=name, limit=limit))
+
+
+@app.route("/api/schedule-runs", methods=["POST"])
+def api_schedule_runs_start():
+    """Open a run. Body (all optional): name, window_from (UTC timestamp).
+
+    Responds with the run (its `window_from` is the checkpoint) and
+    `suggested_since`, a value for /api/shortlist's `since` (null on the first run).
+    """
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name") or "").strip() or DEFAULT_RUN_NAME
+    if len(name) > MAX_RUN_NAME_LENGTH:
+        return jsonify({"error": "name too long (max %d)" % MAX_RUN_NAME_LENGTH}), 400
+    window_from = data.get("window_from")
+    if window_from is not None and not _utc_timestamp(window_from):
+        return jsonify({"error": "window_from must be a UTC timestamp like "
+                                 "2026-11-17T20:15:00Z"}), 400
+    run = SQLiteStorage().start_schedule_run(name, window_from)
+    run["suggested_since"] = _suggested_since(run["window_from"])
+    return jsonify(run), 201
+
+
+@app.route("/api/schedule-runs/<int:run_id>/finish", methods=["POST"])
+def api_schedule_runs_finish(run_id):
+    """Close a run. Body: status (completed / interrupted / failed), summary?."""
+    data = request.get_json(silent=True) or {}
+    status = str(data.get("status") or "").strip()
+    if status not in SQLiteStorage.RUN_END_STATUSES:
+        return jsonify({"error": "status must be one of: %s"
+                                 % ", ".join(SQLiteStorage.RUN_END_STATUSES)}), 400
+    summary = str(data.get("summary") or "").strip()
+    if len(summary) > MAX_NOTES_LENGTH:
+        return jsonify({"error": "summary too long (max %d)" % MAX_NOTES_LENGTH}), 400
+    run = SQLiteStorage().finish_schedule_run(run_id, status, summary or None)
+    if run is None:
+        return jsonify({"error": "unknown run"}), 404
+    return jsonify(run)
+
+
+@app.route("/api/reviews", methods=["GET"])
+def api_reviews_list():
+    """Job review outcomes. Params: run_id, status, limit (default 20)."""
+    limit, error = _limit_arg()
+    if error:
+        return error
+    run_id = None
+    run_raw = request.args.get("run_id", "").strip()
+    if run_raw:
+        if not run_raw.isascii() or not run_raw.isdigit():
+            return jsonify({"error": "run_id must be an integer"}), 400
+        run_id = int(run_raw)
+    status = request.args.get("status", "").strip() or None
+    if status is not None and status not in SQLiteStorage.REVIEW_STATUSES:
+        return jsonify({"error": "status must be one of: %s"
+                                 % ", ".join(SQLiteStorage.REVIEW_STATUSES)}), 400
+    return jsonify(SQLiteStorage().get_job_reviews(run_id=run_id, status=status,
+                                                   limit=limit))
+
+
+@app.route("/api/reviews", methods=["POST"])
+def api_reviews_save():
+    """Record the outcome of reviewing a job.
+
+    Body: linkedin_job_id, status (ready / partial / skipped / blocked /
+    unprocessed), reason?, run_id?. partial and unprocessed jobs are retried by
+    /api/shortlist?exclude_reviewed=1; the rest are left alone.
+    """
+    data = request.get_json(silent=True) or {}
+    job_id, error = _application_job_id(data)
+    if error:
+        return error
+    status = str(data.get("status") or "").strip()
+    if status not in SQLiteStorage.REVIEW_STATUSES:
+        return jsonify({"error": "status must be one of: %s"
+                                 % ", ".join(SQLiteStorage.REVIEW_STATUSES)}), 400
+    reason = str(data.get("reason") or "").strip()
+    if len(reason) > MAX_REASON_LENGTH:
+        return jsonify({"error": "reason too long (max %d)" % MAX_REASON_LENGTH}), 400
+    run_id = data.get("run_id")
+    if run_id is not None and (isinstance(run_id, bool) or not isinstance(run_id, int)):
+        return jsonify({"error": "run_id must be an integer"}), 400
+    storage = SQLiteStorage()
+    if run_id is not None and not storage.schedule_run_exists(run_id):
+        return jsonify({"error": "unknown run"}), 404
+    if not storage.job_post_exists(job_id):
+        return jsonify({"error": "unknown job"}), 404
+    storage.save_job_review(job_id, status, reason or None, run_id)
+    return jsonify({"status": "ok", "linkedin_job_id": job_id, "review_status": status,
+                    "reason": reason or None, "run_id": run_id})
+
+
+@app.route("/api/reviews", methods=["DELETE"])
+def api_reviews_remove():
+    """Forget a job's review so the shortlist can offer it again."""
+    data = request.get_json(silent=True) or {}
+    job_id, error = _application_job_id(data)
+    if error:
+        return error
+    SQLiteStorage().remove_job_review(job_id)
+    return jsonify({"status": "ok", "linkedin_job_id": job_id})
+
+
+SHORTLIST_DEFAULTS = {"since": "2h", "min_score": 29.0, "limit": 10, "apply": "external",
+                      "exclude_reviewed": False}
+SHORTLIST_BOOL_VALUES = {"1": True, "true": True, "0": False, "false": False}
 SHORTLIST_MAX_LIMIT = 100
 SHORTLIST_MAX_SINCE_HOURS = 24 * 365
 SHORTLIST_APPLY_OPTIONS = ("external", "easy_apply", "all")
@@ -402,7 +556,11 @@ def _shortlist_item(job):
 
 @app.route("/api/shortlist", methods=["GET"])
 def api_shortlist():
-    """Best jobs to apply to right now: recent, high-scoring, not applied."""
+    """Best jobs to apply to right now: recent, high-scoring, not applied.
+
+    exclude_reviewed=1 also drops jobs a scheduled run already finished with
+    (see /api/reviews); partial and unprocessed ones stay.
+    """
     params = dict(SHORTLIST_DEFAULTS)
     invalid = {}
     _, days, hours = _parse_since(SHORTLIST_DEFAULTS["since"])
@@ -441,13 +599,21 @@ def api_shortlist():
         else:
             invalid["apply"] = "must be one of: %s" % ", ".join(SHORTLIST_APPLY_OPTIONS)
 
+    reviewed_raw = request.args.get("exclude_reviewed", "").strip().lower()
+    if reviewed_raw:
+        if reviewed_raw in SHORTLIST_BOOL_VALUES:
+            params["exclude_reviewed"] = SHORTLIST_BOOL_VALUES[reviewed_raw]
+        else:
+            invalid["exclude_reviewed"] = "must be 1, 0, true or false"
+
     if invalid:
         return jsonify({"error": "invalid parameters", "invalid": invalid}), 400
 
     filters = dict(min_score=params["min_score"], days=days, hours=hours,
                    apply_type=None if params["apply"] == "all" else params["apply"],
                    hide_blacklisted=True, hide_aggregators=True,
-                   hide_above_level=True, applied="hide")
+                   hide_above_level=True, applied="hide",
+                   hide_reviewed=params["exclude_reviewed"])
     storage = SQLiteStorage()
     total = storage.count_job_summary(unique=True, **filters)
     jobs = storage.get_job_summary(unique=True, page=1, per_page=params["limit"],

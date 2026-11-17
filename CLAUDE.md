@@ -126,6 +126,7 @@ Job Scraper/
     ├── test_job_criteria.py     # Criteria parsing on a current job page (no job function)
     ├── test_aggregators.py      # Aggregator file, table sync, detail-fetch skip
     ├── test_shortlist.py        # /api/shortlist params, fixed filters, ordering, limit
+    ├── test_schedule_runs.py    # schedule_runs / job_reviews storage, their APIs, exclude_reviewed
     ├── test_seniority.py        # "Above my level" rule
     ├── test_scoring_version.py  # scoring_version hash, rescore script
     ├── test_job_keys.py         # Key format, source_of(), job_url_for()
@@ -165,8 +166,9 @@ Job Scraper/
 
 ### Storage
 - **`SQLiteStorage`**: Primary storage (`search_runs`, `job_searches`, `job_posts`,
-  `blacklisted_companies`, `aggregator_companies`, `applications`, `companies`); creates and
-  migrates the schema and syncs the aggregator and company lists on init
+  `blacklisted_companies`, `aggregator_companies`, `applications`, `companies`,
+  `schedule_runs`, `job_reviews`); creates and migrates the schema and syncs the aggregator and
+  company lists on init
 
 ### ATS sources (`scraper/sources/`)
 - **`AtsJob`**: normalized posting (key, source, slug, company, title, locations,
@@ -562,6 +564,51 @@ CREATE TABLE applications (
   `job_summary_unique` keeps up to 2 postings per pair (`SQLiteStorage._APPLIED_SQL`).
   Those twins show a "✓ Similar" button.
 
+### Schedule runs (`schedule_runs`, `job_reviews`)
+Tracking for the Claude "apply" schedule, which starts a fresh session on every execution and
+so needs its state outside the conversation. Both tables are created by `CREATE TABLE IF NOT
+EXISTS` (no data migration).
+```sql
+CREATE TABLE schedule_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,                -- which schedule; default 'apply'
+    started_at TEXT NOT NULL,          -- UTC ISO-8601
+    window_from TEXT,                  -- checkpoint the run started from; NULL on the first run
+    finished_at TEXT,                  -- UTC ISO-8601; NULL while running
+    status TEXT NOT NULL DEFAULT 'running'
+        CHECK (status IN ('running', 'completed', 'interrupted', 'failed')),
+    summary TEXT                       -- free text written when the run ends
+);
+CREATE TABLE job_reviews (
+    linkedin_job_id TEXT PRIMARY KEY,  -- job key of any source, one row per job (latest wins)
+    status TEXT NOT NULL
+        CHECK (status IN ('ready', 'partial', 'skipped', 'blocked', 'unprocessed')),
+    reason TEXT,
+    run_id INTEGER REFERENCES schedule_runs(id),
+    reviewed_at TEXT NOT NULL,         -- first review (kept on updates)
+    updated_at TEXT NOT NULL
+);
+```
+- **Checkpoint:** `start_schedule_run(name)` sets `window_from` to `started_at` of the last
+  *completed* run with the same name (start, not end: that run only saw the jobs that existed
+  when it began). Interrupted / failed runs don't advance it. Starting a run closes any run of
+  the same name still `running` as `interrupted`.
+- **Review statuses:** `ready` (form filled, waiting for me to submit), `skipped` (rule or closed),
+  `blocked` (login / captcha), `partial` (form not finished), `unprocessed` (not reached).
+  `partial` and `unprocessed` are retried: `/api/shortlist?exclude_reviewed=1` hides the other
+  three. To reopen a job, `DELETE /api/reviews`. Applied jobs are hidden by `applications`, not here.
+- **Not tracked per (title, company):** unlike `applications`, a review covers one job key, so a
+  twin posting of a skipped job can show up once.
+- ATS caveat: `date_time` of ATS jobs is their posting date, so a time window alone misses
+  postings collected late; use `exclude_reviewed=1` with a wide `since` (e.g. `30d`) for them.
+- API (`web_app.py`; job keys validated like `/api/applications`, 404 for an unknown job or run):
+  - `POST /api/schedule-runs` `{name?, window_from?}` → 201 with the run, `window_from` and
+    `suggested_since` (`<N>h` from the checkpoint plus 1 h margin; null on the first run)
+  - `POST /api/schedule-runs/<id>/finish` `{status: completed|interrupted|failed, summary?}`
+  - `GET /api/schedule-runs?name=&limit=` newest first, each with `counts` per review status
+  - `POST /api/reviews` `{linkedin_job_id, status, reason?, run_id?}` (reason ≤ 500 chars)
+  - `GET /api/reviews?run_id=&status=&limit=`; `DELETE /api/reviews` `{linkedin_job_id}`
+
 ### Views
 - **`job_summary`**: `job_posts INNER JOIN job_searches` on `linkedin_job_id`, `GROUP BY
   linkedin_job_id` (one row per job). Columns: `linkedin_job_id, title, company, location,
@@ -618,7 +665,9 @@ Exception: `applications.applied_on` is a plain `YYYY-MM-DD` local date.
   `since` (`<N>h`/`<N>d`, 1h–365d, default `2h`; maps to the `hours`/`days` filter),
   `min_score` (≥ 0, default 29; keeps the 14-day shortlist size of
   the pre-cap default 25), `limit` (1–100, default 10), `apply`
-  (`external` default / `easy_apply` / `all`). Empty = default; any invalid value → 400 with
+  (`external` default / `easy_apply` / `all`), `exclude_reviewed` (`1`/`true`/`0`/`false`,
+  default off: hides jobs a scheduled run already reviewed, see "Schedule runs"). Empty = default;
+  any invalid value → 400 with
   `{"error", "invalid": {param: message}}`. Fixed: `hide_blacklisted`, `hide_aggregators`,
   `hide_above_level`, `applied='hide'`; `job_summary_unique` sorted by `weighted_score` desc.
   Response: `params` (effective), `total` (before limit), `count`, `jobs` (fields in

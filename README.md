@@ -25,6 +25,9 @@ A Python application that scrapes job listings from LinkedIn based on configurab
   the "Applied" filter (default "Hide applied") also covers postings with the same title and
   company
 - Shortlist API (`GET /api/shortlist`): JSON list of the best recent jobs to apply to now
+- Schedule run tracking (`/api/schedule-runs`, `/api/reviews`): a log of each scheduled
+  application run with a checkpoint, and the outcome per reviewed job, so the next run only
+  looks at what is new (`/api/shortlist?exclude_reviewed=1`)
 - ATS sources: `python main.py --source ats` reads the public Greenhouse, Lever and Ashby job
   boards of the companies in `config/companies.json`, keeps postings open to Argentina /
   LATAM, and stores and scores them in the same database (web UI "Source" column and filter)
@@ -315,6 +318,7 @@ print(f"Unique locations: {stats['unique_locations']}")
 | `min_score` | `29` | number >= 0 |
 | `limit` | `10` | integer 1–100 |
 | `apply` | `external` | `external`, `easy_apply` or `all` (`all` includes unknown apply type) |
+| `exclude_reviewed` | `0` | `1`/`true` hides jobs already reviewed by a scheduled run (see below); `partial` and `unprocessed` ones stay |
 
 Empty or missing params use the default. Any invalid value returns **400** with every bad
 param listed: `{"error": "invalid parameters", "invalid": {"limit": "..."}}`.
@@ -329,7 +333,8 @@ curl 'http://localhost:5000/api/shortlist?since=6h&min_score=30&limit=5'
 
 ```json
 {
-  "params": {"since": "6h", "min_score": 30.0, "limit": 5, "apply": "external"},
+  "params": {"since": "6h", "min_score": 30.0, "limit": 5, "apply": "external",
+             "exclude_reviewed": false},
   "total": 12,
   "count": 5,
   "jobs": [{
@@ -358,6 +363,34 @@ curl 'http://localhost:5000/api/shortlist?since=6h&min_score=30&limit=5'
   applicant count.
 - `applicant_count_qualifier` is `under`, `over` or `null` (exact). A historical `25` with a
   `null` qualifier most likely means "under 25".
+
+## Schedule run tracking
+
+A scheduled application run starts from a fresh session every time, so what it already did is
+stored here: a log of runs (`schedule_runs`) and the latest outcome per job (`job_reviews`).
+
+```bash
+# 1. Start: returns the run id, the checkpoint (window_from) and a `since` for the shortlist
+curl -X POST localhost:5000/api/schedule-runs -H 'Content-Type: application/json' -d '{}'
+# 2. Fetch only what hasn't been reviewed
+curl 'localhost:5000/api/shortlist?since=7h&exclude_reviewed=1'
+# 3. Record each job (status: ready, partial, skipped, blocked or unprocessed)
+curl -X POST localhost:5000/api/reviews -H 'Content-Type: application/json' \
+  -d '{"linkedin_job_id": "4123456789", "status": "skipped", "reason": "aggregator", "run_id": 1}'
+# 4. Close the run (completed, interrupted or failed)
+curl -X POST localhost:5000/api/schedule-runs/1/finish -H 'Content-Type: application/json' \
+  -d '{"status": "completed", "summary": "3 ready, 5 skipped"}'
+# History, newest first, with the job count per status
+curl 'localhost:5000/api/schedule-runs?limit=5'
+```
+
+- The checkpoint (`window_from`) is the start of the last *completed* run; interrupted or failed
+  runs don't move it. A run still `running` when the next one starts is closed as `interrupted`.
+- `exclude_reviewed=1` hides `ready`, `skipped` and `blocked` jobs and keeps `partial` and
+  `unprocessed` ones, so unfinished work comes back first. `DELETE /api/reviews` with
+  `{"linkedin_job_id": ...}` reopens a job.
+- ATS jobs are dated by their posting date, so for them combine `exclude_reviewed=1` with a
+  wide `since` (e.g. `30d`) instead of relying on the checkpoint window.
 
 ## Keyword Analysis
 

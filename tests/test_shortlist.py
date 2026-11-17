@@ -97,7 +97,7 @@ class TestShortlist(unittest.TestCase):
         # blacklisted, aggregator, above my level, applied and its twin
         self.assertEqual(self._ids(data), ['4000000002', '4000000001', '4000000003'])
         self.assertEqual(data['params'], {'since': '2h', 'min_score': 29.0, 'limit': 10,
-                                          'apply': 'external'})
+                                          'apply': 'external', 'exclude_reviewed': False})
         self.assertEqual(data['total'], 3)
         self.assertEqual(data['count'], 3)
 
@@ -185,7 +185,7 @@ class TestShortlist(unittest.TestCase):
     def test_empty_params_use_defaults(self):
         data = self._get('?since=&min_score=&limit=&apply=')
         self.assertEqual(data['params'], {'since': '2h', 'min_score': 29.0, 'limit': 10,
-                                          'apply': 'external'})
+                                          'apply': 'external', 'exclude_reviewed': False})
 
     def test_invalid_params(self):
         cases = [
