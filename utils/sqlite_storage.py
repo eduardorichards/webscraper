@@ -6,14 +6,14 @@ from datetime import datetime, timezone
 from config.env import DB_PATH
 from config.settings import TARGET_SENIORITY_LEVELS
 from utils.aggregators import load_aggregators
+from utils.companies import load_companies
+from utils.job_keys import LINKEDIN, LINKEDIN_JOB_BASE_URL, LINKEDIN_KEY_SQL, SOURCES  # noqa: F401
 from utils.seniority import levels_above, title_above_level
 from utils.time_utils import utc_now_iso
 
-LINKEDIN_JOB_BASE_URL = "https://www.linkedin.com/jobs/view/"
-
 
 class SQLiteStorage:
-    def __init__(self, db_file=None, aggregators_file=None):
+    def __init__(self, db_file=None, aggregators_file=None, companies_file=None):
         if db_file is None:
             DB_PATH.parent.mkdir(parents=True, exist_ok=True)
             db_file = DB_PATH
@@ -21,6 +21,8 @@ class SQLiteStorage:
         self.db_file = Path(db_file)
         # None = config/aggregators.json
         self.aggregators_file = aggregators_file
+        # None = config/companies.json
+        self.companies_file = companies_file
         self._ensure_db_exists()
 
     def _ensure_db_exists(self):
@@ -133,6 +135,23 @@ class SQLiteStorage:
         )
         """)
 
+        # Table 7: Companies whose ATS job boards are read (main.py --source
+        # ats), synced from config/companies.json below. last_checked_at /
+        # last_job_count are written by the collector, never by the sync.
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS companies (
+            name TEXT PRIMARY KEY,
+            ats TEXT NOT NULL,
+            slug TEXT NOT NULL,
+            priority TEXT,
+            hires_in_ar TEXT,
+            notes TEXT,
+            active INTEGER DEFAULT 1,
+            last_checked_at TEXT,
+            last_job_count INTEGER
+        )
+        """)
+
         # Migrations: columns added after the first release. Existing rows
         # keep NULL (ADD COLUMN does not rewrite the table).
         self._add_column_if_missing(cursor, 'job_searches', 'scraped_at', 'TEXT')
@@ -160,8 +179,16 @@ class SQLiteStorage:
         # more results left. NULL on runs before pagination.
         self._add_column_if_missing(cursor, 'search_runs', 'pages_fetched', 'INTEGER')
         self._add_column_if_missing(cursor, 'search_runs', 'hit_page_limit', 'INTEGER')
+        # Job source: NULL = LinkedIn, else 'greenhouse' / 'lever' / 'ashby'
+        # (see utils/job_keys.py). job_url: posting URL for non-LinkedIn jobs.
+        self._add_column_if_missing(cursor, 'job_searches', 'source', 'TEXT')
+        self._add_column_if_missing(cursor, 'job_searches', 'job_url', 'TEXT')
+        # Posting date given by the source (ATS boards); NULL for LinkedIn,
+        # whose date_time is close to the posting time already
+        self._add_column_if_missing(cursor, 'job_posts', 'posted_at', 'TEXT')
 
         self._sync_aggregators(cursor)
+        self._sync_companies(cursor)
 
         # Indexes
         cursor.execute("""
@@ -186,7 +213,8 @@ class SQLiteStorage:
         ON job_posts(employment_type)
         """)
 
-        # View: combined job data for display
+        # View: combined job data for display. date_time is the source's
+        # posting date when known (ATS jobs), else when the job was analyzed.
         cursor.execute("DROP VIEW IF EXISTS job_summary")
         cursor.execute("""
         CREATE VIEW job_summary AS
@@ -195,7 +223,7 @@ class SQLiteStorage:
             js.title,
             js.company,
             js.location,
-            jp.date_time,
+            COALESCE(jp.posted_at, jp.date_time) AS date_time,
             jp.applicant_count,
             jp.weighted_score,
             jp.match_percentage,
@@ -206,7 +234,9 @@ class SQLiteStorage:
             jp.seniority_level,
             jp.applicant_count_qualifier,
             jp.employment_type,
-            jp.industries
+            jp.industries,
+            js.source,
+            js.job_url
         FROM job_posts jp
         INNER JOIN job_searches js ON js.linkedin_job_id = jp.linkedin_job_id
         GROUP BY jp.linkedin_job_id
@@ -221,7 +251,7 @@ class SQLiteStorage:
                applicant_count, weighted_score, match_percentage,
                total_matches, matched_keywords, apply_type, apply_url,
                seniority_level, applicant_count_qualifier, employment_type,
-               industries
+               industries, source, job_url
         FROM (
             SELECT *,
                 ROW_NUMBER() OVER (
@@ -256,6 +286,85 @@ class SQLiteStorage:
         cursor.execute(
             f"DELETE FROM aggregator_companies WHERE company NOT IN ({placeholders})",
             companies)
+
+    def _sync_companies(self, cursor):
+        """Make companies match the data file (idempotent).
+
+        Inserts new companies, updates changed config fields, and deletes
+        companies no longer listed. last_checked_at / last_job_count are
+        never touched for listed companies.
+        """
+        entries = load_companies(self.companies_file)
+        fields = ('ats', 'slug', 'priority', 'hires_in_ar', 'notes', 'active')
+        for entry in entries:
+            values = [entry[f] if f != 'active' else int(entry[f]) for f in fields]
+            cursor.execute(
+                "INSERT OR IGNORE INTO companies (name, %s) VALUES (?, %s)"
+                % (", ".join(fields), ", ".join("?" * len(fields))),
+                [entry['name']] + values)
+            cursor.execute(
+                "UPDATE companies SET %s WHERE name = ? AND (%s)"
+                % (", ".join("%s = ?" % f for f in fields),
+                   " OR ".join("%s IS NOT ?" % f for f in fields)),
+                values + [entry['name']] + values)
+        names = [entry['name'] for entry in entries]
+        placeholders = ", ".join("?" * len(names))
+        cursor.execute(f"DELETE FROM companies WHERE name NOT IN ({placeholders})", names)
+
+    def get_companies(self, active_only=True):
+        """Companies to read ATS boards from, as dicts, in data-file order
+        (rowid) so the list order is the reading order."""
+        query = "SELECT * FROM companies"
+        if active_only:
+            query += " WHERE active = 1"
+        conn = sqlite3.connect(self.db_file)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(query + " ORDER BY rowid").fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def mark_company_checked(self, name, job_count):
+        """Record when a company's board was last read and how many postings
+        it returned (0 for errors and empty boards)."""
+        conn = sqlite3.connect(self.db_file)
+        conn.execute(
+            "UPDATE companies SET last_checked_at = ?, last_job_count = ? WHERE name = ?",
+            (utc_now_iso(), job_count, name))
+        conn.commit()
+        conn.close()
+
+    def is_aggregator(self, company):
+        """True if the company is in aggregator_companies."""
+        conn = sqlite3.connect(self.db_file)
+        row = conn.execute("SELECT 1 FROM aggregator_companies WHERE company = ?",
+                           (company,)).fetchone()
+        conn.close()
+        return row is not None
+
+    def job_key_exists(self, key):
+        """True if the key has a job_searches or a job_posts row."""
+        conn = sqlite3.connect(self.db_file)
+        row = conn.execute(
+            "SELECT 1 FROM job_searches WHERE linkedin_job_id = ?"
+            " UNION ALL SELECT 1 FROM job_posts WHERE linkedin_job_id = ? LIMIT 1",
+            (key, key)).fetchone()
+        conn.close()
+        return row is not None
+
+    def add_ats_job(self, job, search_run_id=None, scraped_at=None):
+        """Insert the job_searches row of an ATS posting (an AtsJob)."""
+        conn = sqlite3.connect(self.db_file)
+        conn.execute("""
+            INSERT INTO job_searches (
+                linkedin_job_id, title, company, location, search_keywords,
+                search_location, search_remote, scraped_at, search_run_id,
+                source, job_url
+            ) VALUES (?, ?, ?, ?, 'ats', ?, ?, ?, ?, ?, ?)
+        """, (job.key, job.title, job.company, job.location_raw, job.slug,
+              'Yes' if job.remote else 'No', scraped_at or utc_now_iso(),
+              search_run_id, job.source, job.job_url))
+        conn.commit()
+        conn.close()
 
     def get_aggregator_companies(self):
         """Return [{'company', 'category', 'reason'}] sorted by company."""
@@ -406,8 +515,9 @@ class SQLiteStorage:
             'file_path': self.db_file
         }
 
-    # Candidate jobs for detail scraping: max 2 IDs per (title, company),
-    # the first ones seen, without a job_posts row yet
+    # Candidate jobs for detail scraping: LinkedIn IDs only (other sources
+    # are scored when collected), max 2 IDs per (title, company), the first
+    # ones seen, without a job_posts row yet
     _PENDING_JOBS_SQL = """
         WITH unique_jobs AS (
             SELECT linkedin_job_id, title, company,
@@ -416,6 +526,7 @@ class SQLiteStorage:
                     ORDER BY id ASC
                 ) as row_num
             FROM job_searches
+            WHERE """ + LINKEDIN_KEY_SQL.format(col="linkedin_job_id") + """
             GROUP BY linkedin_job_id
         )
         SELECT uj.linkedin_job_id, uj.title, uj.company
@@ -481,8 +592,8 @@ class SQLiteStorage:
                 total_matches, weighted_score, matched_keywords, match_percentage,
                 employment_type, job_function, seniority_level, industries,
                 applicant_count_qualifier, scraped_at, apply_type, apply_url,
-                scoring_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                scoring_version, posted_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             match_result.linkedin_job_id,
             match_result.description,
@@ -501,6 +612,7 @@ class SQLiteStorage:
             match_result.apply_type,
             match_result.apply_url,
             match_result.scoring_version,
+            match_result.posted_at,
         ))
 
         conn.commit()
@@ -519,7 +631,7 @@ class SQLiteStorage:
                 jp.description, jp.applicant_count, jp.date_time,
                 jp.employment_type, jp.job_function, jp.seniority_level,
                 jp.industries, jp.total_matches, jp.weighted_score,
-                jp.matched_keywords, jp.match_percentage
+                jp.matched_keywords, jp.match_percentage, js.source, js.job_url
             FROM job_posts jp
             INNER JOIN job_searches js ON js.linkedin_job_id = jp.linkedin_job_id
             WHERE jp.weighted_score >= ?
@@ -594,6 +706,8 @@ class SQLiteStorage:
     # same (title, company) as an applied job, since job_summary_unique
     # keeps up to 2 postings per pair
     APPLIED_FILTERS = ('hide', 'only', 'all')
+    # Source filter values (utils/job_keys.py); 'linkedin' matches NULL
+    SOURCE_FILTERS = SOURCES
     # seniority_level values hidden by hide_above_level (from config.settings)
     ABOVE_TARGET_LEVELS = levels_above(TARGET_SENIORITY_LEVELS)
 
@@ -624,7 +738,7 @@ class SQLiteStorage:
                                hide_above_level=False, search=None,
                                employment_types=None, max_score=None,
                                min_match=None, keywords=None, under_25=False,
-                               applied='all'):
+                               applied='all', source=None):
         """Build the WHERE clause and bound params shared by summary queries.
 
         The view must be aliased `v`. List filters (employment_types,
@@ -685,6 +799,12 @@ class SQLiteStorage:
         elif apply_type in self.APPLY_FILTERS:
             clauses.append("apply_type = ?")
             params.append(apply_type)
+
+        if source == LINKEDIN:
+            clauses.append("source IS NULL")
+        elif source in self.SOURCE_FILTERS:
+            clauses.append("source = ?")
+            params.append(source)
 
         if hide_aggregators:
             clauses.append(
@@ -813,7 +933,7 @@ class SQLiteStorage:
             'linkedin_job_id', 'title', 'company', 'location',
             'date_time', 'applicant_count', 'weighted_score',
             'match_percentage', 'total_matches', 'matched_keywords',
-            'apply_type', 'apply_url', 'seniority_level'
+            'apply_type', 'apply_url', 'seniority_level', 'source', 'job_url'
         ]
 
         with open(filepath, 'w', newline='', encoding='utf-8') as f:

@@ -1,9 +1,10 @@
 """Orchestrator for keyword matching workflow."""
 import logging
 
+from utils.job_keys import job_url_for
 from utils.time_utils import utc_now_iso
 
-from ..models.match_result import MatchResult, LINKEDIN_JOB_BASE_URL
+from ..models.match_result import MatchResult
 from ..analyzers.keyword_analyzer import KeywordAnalyzer
 from .detail_scraper import DetailScraper
 
@@ -51,7 +52,8 @@ class KeywordMatcher:
 
         for i, job in enumerate(jobs):
             linkedin_job_id = job['linkedin_job_id']
-            job_url = f"{LINKEDIN_JOB_BASE_URL}{linkedin_job_id}/"
+            # get_jobs_without_analysis() only returns LinkedIn IDs
+            job_url = job_url_for(linkedin_job_id)
 
             print(f"\n  [{i + 1}/{len(jobs)}] {job.get('title', 'Unknown')[:50]}...")
 
@@ -125,7 +127,7 @@ class KeywordMatcher:
                 applicants = result.get('applicant_count')
                 matched_kws = result.get('matched_keywords', [])
                 linkedin_id = result.get('linkedin_job_id', '')
-                url = f"{LINKEDIN_JOB_BASE_URL}{linkedin_id}/"
+                url = job_url_for(linkedin_id, result.get('job_url'))
 
             title = result.get('title', 'Unknown') if isinstance(result, dict) else linkedin_id
             company = result.get('company', 'Unknown') if isinstance(result, dict) else ''

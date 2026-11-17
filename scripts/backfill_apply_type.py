@@ -26,7 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from config.env import LOG_DIR  # noqa: E402
 from scraper.core.detail_scraper import DetailScraper  # noqa: E402
-from scraper.models.match_result import LINKEDIN_JOB_BASE_URL  # noqa: E402
+from utils.job_keys import job_url_for  # noqa: E402
 from utils.sqlite_storage import SQLiteStorage  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -116,7 +116,11 @@ def release_lock(lock_path):
 
 
 def select_jobs(db_file, since='-3 days', min_score=0, limit=300):
-    """Rows still missing apply_type, analyzed within `since`, newest first."""
+    """Rows still missing apply_type, analyzed within `since`, newest first.
+
+    LinkedIn IDs only: the numeric-ID check leaves out ATS keys
+    ('lever:<slug>:<id>'), which are saved with apply_type 'external' anyway.
+    """
     conn = sqlite3.connect(str(db_file))
     conn.row_factory = sqlite3.Row
     rows = conn.execute("""
@@ -157,7 +161,7 @@ def backfill(db_file, jobs, scraper=None):
 
     for i, job in enumerate(jobs, 1):
         job_id = job['linkedin_job_id']
-        details = scraper.scrape_job_details(f"{LINKEDIN_JOB_BASE_URL}{job_id}/")
+        details = scraper.scrape_job_details(job_url_for(job_id))
 
         if details is None:
             outcome = 'errors'

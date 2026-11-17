@@ -115,6 +115,7 @@ def load_settings(environ):
     """Parse and validate settings from a mapping of environment variables."""
     scrape_min, scrape_max = _delay_range(environ, "SCRAPE", 2, 4)
     search_min, search_max = _delay_range(environ, "SEARCH", 2, 4)
+    ats_min, ats_max = _delay_range(environ, "ATS", 1, 2)
     return {
         # Web app
         "PORT": _int(environ, "PORT", 5000, min_value=1, max_value=65535),
@@ -140,6 +141,9 @@ def load_settings(environ):
         # Result pages fetched per search template (first page + "See more jobs")
         "SEARCH_MAX_PAGES": _int(environ, "SEARCH_MAX_PAGES", 4,
                                  min_value=1, max_value=100),
+        # Delay between companies when reading ATS job boards (--source ats)
+        "ATS_MIN_DELAY": ats_min,
+        "ATS_MAX_DELAY": ats_max,
     }
 
 
@@ -176,3 +180,5 @@ MAX_RETRIES = _settings["MAX_RETRIES"]
 SEARCH_MIN_DELAY = _settings["SEARCH_MIN_DELAY"]
 SEARCH_MAX_DELAY = _settings["SEARCH_MAX_DELAY"]
 SEARCH_MAX_PAGES = _settings["SEARCH_MAX_PAGES"]
+ATS_MIN_DELAY = _settings["ATS_MIN_DELAY"]
+ATS_MAX_DELAY = _settings["ATS_MAX_DELAY"]

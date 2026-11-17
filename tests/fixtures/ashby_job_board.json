@@ -1,0 +1,118 @@
+{
+ "apiVersion": "1",
+ "jobs": [
+  {
+   "id": "993557d9-7482-4f63-aae0-5817998b2368",
+   "title": "Senior Analytics Engineer",
+   "department": "Engineering",
+   "team": "Data Engineering",
+   "employmentType": "FullTime",
+   "location": "United States",
+   "secondaryLocations": [],
+   "publishedAt": "2026-10-16T10:44:16.327+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Remote",
+   "jobUrl": "https://jobs.ashbyhq.com/kraken.com/993557d9-7482-4f63-aae0-5817998b2368",
+   "applyUrl": "https://jobs.ashbyhq.com/kraken.com/993557d9-7482-4f63-aae0-5817998b2368/application",
+   "descriptionPlain": "Build data pipelines with Python and SQL."
+  },
+  {
+   "id": "1b2c3d4e-0000-4a5b-8c7d-111111111111",
+   "title": "Backend Engineer - Payments",
+   "department": "Engineering",
+   "team": "Data Engineering",
+   "employmentType": "FullTime",
+   "location": "Brazil",
+   "secondaryLocations": [
+    {
+     "location": "Peru",
+     "address": {
+      "postalAddress": {
+       "addressCountry": "Peru"
+      }
+     }
+    },
+    {
+     "location": "Colombia",
+     "address": {
+      "postalAddress": {
+       "addressCountry": "Colombia"
+      }
+     }
+    },
+    {
+     "location": "Argentina",
+     "address": {
+      "postalAddress": {
+       "addressCountry": "Argentina"
+      }
+     }
+    },
+    {
+     "location": "Mexico",
+     "address": {
+      "postalAddress": {
+       "addressCountry": "Mexico"
+      }
+     }
+    }
+   ],
+   "publishedAt": "2026-11-12T08:00:00Z",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Remote",
+   "jobUrl": "https://jobs.ashbyhq.com/kraken.com/1b2c3d4e-0000-4a5b-8c7d-111111111111",
+   "applyUrl": "https://jobs.ashbyhq.com/kraken.com/1b2c3d4e-0000-4a5b-8c7d-111111111111/application",
+   "descriptionPlain": "We use Python, Go and AWS."
+  },
+  {
+   "id": "2b2c3d4e-0000-4a5b-8c7d-222222222222",
+   "title": "Software Engineer",
+   "department": "Engineering",
+   "team": "Data Engineering",
+   "employmentType": "Contract",
+   "location": "Remote",
+   "secondaryLocations": [],
+   "publishedAt": "2026-10-16T10:44:16.327+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Remote",
+   "jobUrl": "https://jobs.ashbyhq.com/kraken.com/2b2c3d4e-0000-4a5b-8c7d-222222222222",
+   "applyUrl": "https://jobs.ashbyhq.com/kraken.com/2b2c3d4e-0000-4a5b-8c7d-222222222222/application",
+   "descriptionPlain": "Python and TypeScript. Candidates must be authorized to work in the United States."
+  },
+  {
+   "id": "3b2c3d4e-0000-4a5b-8c7d-333333333333",
+   "title": "Platform Engineer",
+   "department": "Engineering",
+   "team": "Data Engineering",
+   "employmentType": "PartTime",
+   "location": "AMER",
+   "secondaryLocations": [],
+   "publishedAt": "2026-10-16T10:44:16.327+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Remote",
+   "jobUrl": "https://jobs.ashbyhq.com/kraken.com/3b2c3d4e-0000-4a5b-8c7d-333333333333",
+   "applyUrl": "https://jobs.ashbyhq.com/kraken.com/3b2c3d4e-0000-4a5b-8c7d-333333333333/application",
+   "descriptionPlain": "Kubernetes and AWS."
+  },
+  {
+   "id": "4b2c3d4e-0000-4a5b-8c7d-444444444444",
+   "title": "Hidden Role",
+   "department": "Engineering",
+   "team": "Data Engineering",
+   "employmentType": "FullTime",
+   "location": "Argentina",
+   "secondaryLocations": [],
+   "publishedAt": "2026-10-16T10:44:16.327+00:00",
+   "isListed": false,
+   "isRemote": true,
+   "workplaceType": "Remote",
+   "jobUrl": "https://jobs.ashbyhq.com/kraken.com/4b2c3d4e-0000-4a5b-8c7d-444444444444",
+   "applyUrl": "https://jobs.ashbyhq.com/kraken.com/4b2c3d4e-0000-4a5b-8c7d-444444444444/application",
+   "descriptionPlain": "Unlisted."
+  }
+ ]
+}

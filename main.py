@@ -2,6 +2,7 @@
 Main entry point for the Job Scraper application
 """
 
+import argparse
 import logging
 import time
 import random
@@ -172,18 +173,41 @@ def analyze_keywords(keywords=None, weights=None, skip_analyzed=True, top_n=20,
     return results
 
 
+def collect_ats_jobs():
+    """Read the ATS boards of the active companies in config/companies.json,
+    storing and scoring kept postings (see scraper/sources/ats_collector.py)."""
+    from config.keyword_settings import DEFAULT_KEYWORDS, WEIGHTED_KEYWORDS
+    from scraper.sources.ats_collector import collect_ats
+
+    keyword_config = KeywordConfig(keywords=DEFAULT_KEYWORDS, weights=WEIGHTED_KEYWORDS)
+    return collect_ats(SQLiteStorage(), keyword_config)
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="Collect and score job postings.")
+    parser.add_argument(
+        "--source", choices=("linkedin", "ats"), default="linkedin",
+        help="linkedin (default): LinkedIn searches + keyword analysis; "
+             "ats: only the Greenhouse/Lever/Ashby boards in config/companies.json")
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
+    args = parse_args()
     setup_logging()
     logger = logging.getLogger()
 
     try:
-        run_started_at = utc_now_iso()
+        if args.source == "ats":
+            collect_ats_jobs()
+        else:
+            run_started_at = utc_now_iso()
 
-        # Run batch job search
-        multiple_search()
+            # Run batch job search
+            multiple_search()
 
-        # Analyze existing jobs for keywords
-        analyze_keywords(since=run_started_at)
+            # Analyze existing jobs for keywords
+            analyze_keywords(since=run_started_at)
     except Exception:
         logger.exception("Scraper failed with an error")
         raise

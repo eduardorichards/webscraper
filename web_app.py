@@ -5,6 +5,7 @@ from datetime import date, datetime
 from flask import Flask, render_template, request, jsonify, url_for
 from config import env
 from config.keyword_settings import DEFAULT_KEYWORDS
+from utils.job_keys import SOURCE_LABELS, is_valid_key, job_url_for, source_of
 from utils.sqlite_storage import SQLiteStorage
 
 app = Flask(__name__)
@@ -96,6 +97,19 @@ def score_badge(score):
 
 
 @app.template_global()
+def job_link(job):
+    """Posting URL of a summary row: LinkedIn from the ID, else the stored URL."""
+    return job_url_for(job.get("linkedin_job_id"), job.get("job_url"))
+
+
+@app.template_global()
+def source_label(job):
+    """"LinkedIn" / "Greenhouse" / "Lever" / "Ashby" for a summary row."""
+    source = job.get("source") or source_of(job.get("linkedin_job_id"))
+    return SOURCE_LABELS.get(source, source or "-")
+
+
+@app.template_global()
 def applicants_label(job):
     """"<25" / ">200" / exact count / "-".
 
@@ -142,6 +156,8 @@ def _active_filter_chips(query_args, defaults):
         add("Keyword: %s" % value, kw=[v for v in query_args["kw"] if v != value])
     if query_args["apply"]:
         add("Apply: %s" % APPLY_LABELS[query_args["apply"]], apply="")
+    if query_args["source"]:
+        add("Source: %s" % SOURCE_LABELS[query_args["source"]], source="")
     if query_args["under25"] == "1":
         add("Under 25 applicants", under25="0")
     if query_args["applied"] != defaults["applied"]:
@@ -176,6 +192,9 @@ def index():
     apply_raw = request.args.get("apply", "")
     if apply_raw not in SQLiteStorage.APPLY_FILTERS:
         apply_raw = ""
+    source = request.args.get("source", "")
+    if source not in SQLiteStorage.SOURCE_FILTERS:
+        source = ""
     applied = request.args.get("applied", DEFAULT_APPLIED)
     if applied not in SQLiteStorage.APPLIED_FILTERS:
         applied = DEFAULT_APPLIED
@@ -197,7 +216,7 @@ def index():
                    search=search or None, employment_types=employment_types,
                    keywords=keywords, under_25=under_25, applied=applied,
                    hide_blacklisted=hide_blacklisted,
-                   apply_type=apply_raw or None,
+                   apply_type=apply_raw or None, source=source or None,
                    hide_aggregators=hide_aggregators,
                    hide_above_level=hide_above_level)
 
@@ -233,6 +252,7 @@ def index():
         "hide_aggregators": "1" if hide_aggregators else "0",
         "hide_above_level": "1" if hide_above_level else "0",
         "apply": apply_raw,
+        "source": source,
         "per_page": per_page,
         "sort": sort,
         "dir": direction,
@@ -248,6 +268,7 @@ def index():
                            blacklisted=blacklisted,
                            days=days_raw, location=location, hours=hours,
                            hide_blacklisted=hide_blacklisted, apply=apply_raw,
+                           source=source, source_labels=SOURCE_LABELS,
                            hide_aggregators=hide_aggregators,
                            hide_above_level=hide_above_level,
                            under_25=under_25, applied=applied,
@@ -292,9 +313,13 @@ def api_blacklist_remove():
 
 
 def _application_job_id(data):
-    """Validated linkedin_job_id from a JSON body, or (None, error response)."""
+    """Validated linkedin_job_id from a JSON body, or (None, error response).
+
+    A numeric LinkedIn ID or an ATS key ('lever:<slug>:<id>', see
+    utils/job_keys.py).
+    """
     job_id = str(data.get("linkedin_job_id") or "").strip()
-    if not re.fullmatch(r"[0-9]+", job_id):
+    if not is_valid_key(job_id):
         return None, (jsonify({"error": "linkedin_job_id required"}), 400)
     return job_id, None
 
@@ -349,7 +374,6 @@ SHORTLIST_FIELDS = ("linkedin_job_id", "title", "company", "location", "date_tim
                     "weighted_score", "match_percentage", "matched_keywords",
                     "seniority_level", "employment_type", "apply_type",
                     "applicant_count", "applicant_count_qualifier")
-JOB_URL_TEMPLATE = "https://www.linkedin.com/jobs/view/{}/"
 
 
 def _parse_since(value):
@@ -371,7 +395,8 @@ def _shortlist_item(job):
     item = {field: job.get(field) for field in SHORTLIST_FIELDS}
     keywords = item["matched_keywords"] or ""
     item["matched_keywords"] = [kw.strip() for kw in keywords.split(",") if kw.strip()]
-    item["job_url"] = JOB_URL_TEMPLATE.format(job["linkedin_job_id"])
+    item["source"] = job.get("source") or source_of(job["linkedin_job_id"])
+    item["job_url"] = job_url_for(job["linkedin_job_id"], job.get("job_url"))
     return item
 
 

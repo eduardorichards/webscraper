@@ -99,6 +99,14 @@ class TestMigrations(unittest.TestCase):
         self.assertIn('apply_type', self._columns('job_posts'))
         self.assertIn('apply_url', self._columns('job_posts'))
         self.assertIn('scoring_version', self._columns('job_posts'))
+        self.assertIn('posted_at', self._columns('job_posts'))
+        self.assertIn('source', self._columns('job_searches'))
+        self.assertIn('job_url', self._columns('job_searches'))
+        self.assertEqual(
+            self._columns('companies'),
+            ['name', 'ats', 'slug', 'priority', 'hires_in_ar', 'notes',
+             'active', 'last_checked_at', 'last_job_count'])
+        self.assertGreater(self._query("SELECT COUNT(*) FROM companies")[0][0], 0)
         self.assertEqual(
             self._columns('search_runs'),
             ['id', 'template_name', 'keywords', 'location', 'started_at',
@@ -142,6 +150,17 @@ class TestMigrations(unittest.TestCase):
             " WHERE apply_type IS NOT NULL OR apply_url IS NOT NULL")[0][0], 0)
         self.assertEqual(self._query(
             "SELECT COUNT(*) FROM job_posts WHERE scoring_version IS NOT NULL")[0][0], 0)
+        # Old rows are LinkedIn rows: source NULL, no job_url, no posted_at
+        self.assertEqual(self._query(
+            "SELECT COUNT(*) FROM job_searches"
+            " WHERE source IS NOT NULL OR job_url IS NOT NULL")[0][0], 0)
+        self.assertEqual(self._query(
+            "SELECT COUNT(*) FROM job_posts WHERE posted_at IS NOT NULL")[0][0], 0)
+        # The views still show them, dated by date_time
+        self.assertEqual(
+            self._query("SELECT date_time, source, job_url FROM job_summary"
+                        " WHERE linkedin_job_id = '300'"),
+            [('2026-10-03T10:00:00Z', None, None)])
         # Other data untouched
         self.assertEqual(
             self._query("SELECT date_time, weighted_score FROM job_posts"
@@ -170,6 +189,9 @@ class TestMigrations(unittest.TestCase):
         self.assertEqual(
             self._query("SELECT COUNT(*) FROM aggregator_companies")[0][0],
             self._query("SELECT COUNT(DISTINCT company) FROM aggregator_companies")[0][0])
+        self.assertEqual(
+            self._query("SELECT COUNT(*) FROM companies")[0][0],
+            self._query("SELECT COUNT(DISTINCT name) FROM companies")[0][0])
 
     def test_search_runs_without_pagination_columns(self):
         # search_runs as created before pagination: rows keep NULL pages

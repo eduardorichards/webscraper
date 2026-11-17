@@ -1,0 +1,96 @@
+{
+ "jobs": [
+  {
+   "absolute_url": "https://job-boards.greenhouse.io/gitlab/jobs/8638232002",
+   "id": 8638232002,
+   "internal_job_id": 8638231002,
+   "location": {
+    "name": "Remote, United States"
+   },
+   "offices": [
+    {
+     "id": 4040904002,
+     "name": "United States of America",
+     "location": null,
+     "child_ids": [],
+     "parent_id": 4019551002
+    }
+   ],
+   "title": "Backend Engineer, Python",
+   "company_name": "GitLab",
+   "first_published": "2026-07-22T13:38:40-04:00",
+   "updated_at": "2026-11-06T15:25:07-05:00",
+   "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;p&gt;GitLab is the intelligent orchestration platform for DevSecOps.&lt;/p&gt;&lt;/div&gt;&lt;h2&gt;What you&amp;#39;ll do&lt;/h2&gt;&lt;ul&gt;&lt;li&gt;Build APIs in &lt;strong&gt;Python&lt;/strong&gt; &amp;amp; Go&lt;/li&gt;&lt;li&gt;Work with PostgreSQL&lt;/li&gt;&lt;/ul&gt;",
+   "departments": [
+    {
+     "id": 4114891002,
+     "name": "Enablement",
+     "child_ids": [],
+     "parent_id": 4011049002
+    }
+   ]
+  },
+  {
+   "absolute_url": "https://job-boards.greenhouse.io/gitlab/jobs/8638232003",
+   "id": 8638232003,
+   "internal_job_id": 8638231003,
+   "location": {
+    "name": "Remote, LATAM"
+   },
+   "offices": [
+    {
+     "id": 4040905002,
+     "name": "Americas",
+     "location": "Buenos Aires, Argentina",
+     "child_ids": [],
+     "parent_id": null
+    }
+   ],
+   "title": "Junior Backend Engineer (Java)",
+   "company_name": "GitLab",
+   "updated_at": "2026-11-10T09:00:00-03:00",
+   "content": "&lt;p&gt;Join our team. You will write &lt;em&gt;Java&lt;/em&gt; and Spring Boot services and use Docker.&lt;/p&gt;",
+   "departments": [
+    {
+     "id": 4114891002,
+     "name": "Enablement",
+     "child_ids": [],
+     "parent_id": 4011049002
+    }
+   ]
+  },
+  {
+   "absolute_url": "https://job-boards.greenhouse.io/gitlab/jobs/8638232004",
+   "id": 8638232004,
+   "internal_job_id": 8638231004,
+   "location": {
+    "name": "Remote, Canada; Remote, Poland"
+   },
+   "offices": [
+    {
+     "id": 4040906002,
+     "name": "Remote office",
+     "location": "Kraków, Poland",
+     "child_ids": [],
+     "parent_id": null
+    }
+   ],
+   "title": "Support Engineer",
+   "company_name": "GitLab",
+   "first_published": "2026-07-22T13:38:40-04:00",
+   "updated_at": "2026-11-06T15:25:07-05:00",
+   "content": "&lt;p&gt;Help customers.&lt;/p&gt;",
+   "departments": [
+    {
+     "id": 4114891002,
+     "name": "Enablement",
+     "child_ids": [],
+     "parent_id": 4011049002
+    }
+   ]
+  }
+ ],
+ "meta": {
+  "total": 3
+ }
+}

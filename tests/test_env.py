@@ -33,6 +33,8 @@ class TestDefaults(unittest.TestCase):
             "SEARCH_MIN_DELAY": 2,
             "SEARCH_MAX_DELAY": 4,
             "SEARCH_MAX_PAGES": 4,
+            "ATS_MIN_DELAY": 1,
+            "ATS_MAX_DELAY": 2,
         })
 
     def test_empty_values_use_defaults(self):

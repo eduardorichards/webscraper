@@ -2,14 +2,16 @@
 
 from datetime import datetime, timezone
 
-LINKEDIN_JOB_BASE_URL = "https://www.linkedin.com/jobs/view/"
+from utils.job_keys import LINKEDIN_JOB_BASE_URL, job_url_for  # noqa: F401
 
 
 class MatchResult:
     """Stores keyword match analysis results for a single job post."""
 
-    def __init__(self, linkedin_job_id):
+    def __init__(self, linkedin_job_id, source_url=None):
         self.linkedin_job_id = linkedin_job_id
+        # Posting URL stored for non-LinkedIn jobs (job_searches.job_url)
+        self.source_url = source_url
 
         # Scraped data
         self.description = None
@@ -24,6 +26,7 @@ class MatchResult:
         self.scraped_at = None  # Timestamp when details were fetched (None if the fetch failed)
         self.apply_type = None  # 'easy_apply' / 'external', None if unknown
         self.apply_url = None  # External apply URL, when the page exposes it
+        self.posted_at = None  # Posting date given by the source (ATS jobs only)
 
         # Match results
         self.keyword_matches = {}  # {keyword: count}
@@ -36,8 +39,8 @@ class MatchResult:
 
     @property
     def job_url(self):
-        """Construct job URL from linkedin_job_id."""
-        return f"{LINKEDIN_JOB_BASE_URL}{self.linkedin_job_id}/"
+        """LinkedIn URL built from the ID, or the stored URL of other sources."""
+        return job_url_for(self.linkedin_job_id, self.source_url)
 
     def calculate_score(self, keyword_config):
         """Calculate weighted score based on matches and weights."""
@@ -77,6 +80,7 @@ class MatchResult:
             'seniority_level': self.seniority_level,
             'industries': self.industries,
             'scoring_version': self.scoring_version,
+            'posted_at': self.posted_at,
         }
 
     def __repr__(self):

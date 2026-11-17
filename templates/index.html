@@ -257,6 +257,15 @@
                     <option value="unknown"    {% if apply == 'unknown'    %}selected{% endif %}>Unknown</option>
                 </select>
             </label>
+            <label>
+                Source
+                <select name="source" onchange="this.form.submit()">
+                    <option value="" {% if source == '' %}selected{% endif %}>All</option>
+                    {% for value, text in source_labels.items() %}
+                    <option value="{{ value }}" {% if source == value %}selected{% endif %}>{{ text }}</option>
+                    {% endfor %}
+                </select>
+            </label>
             <label title="Hide/only also covers postings with the same title and company as an applied job">
                 Applied
                 <select name="applied" onchange="this.form.submit()">
@@ -319,6 +328,7 @@
                 <th aria-label="Details"></th>
                 <th>{{ sort_link('title', 'Title') }}<span class="sep">/</span>{{ sort_link('company', 'Company') }}</th>
                 {{ sort_th('location', 'Location', cls='col-opt') }}
+                <th class="col-opt">Source</th>
                 {{ sort_th('date_time', 'Posted', 'desc') }}
                 {{ sort_th('applicant_count', 'Appl.') }}
                 {{ sort_th('weighted_score', 'Score', 'desc') }}
@@ -342,6 +352,7 @@
                     <span class="job-company" title="{{ job.company or '' }}">{{ job.company or "-" }}</span>
                 </td>
                 <td class="location col-opt" title="{{ job.location or '' }}">{{ job.location or "-" }}</td>
+                <td class="nowrap col-opt">{{ source_label(job) }}</td>
                 <td class="nowrap utc-time" data-utc="{{ job.date_time or '' }}">{{ job.date_time[:10] if job.date_time else "-" }}</td>
                 <td class="nowrap {{ 'applicants-under' if appl.startswith('<') }}">{{ appl }}</td>
                 <td><span class="score score-{{ score_badge(job.weighted_score) }}">{{ "%.1f"|format(job.weighted_score) if job.weighted_score is not none else "-" }}</span></td>
@@ -361,7 +372,8 @@
                     {% else %}-{% endif %}
                 </td>
                 <td class="actions">
-                    {% if job_id %}<a href="https://www.linkedin.com/jobs/view/{{ job_id }}/" target="_blank" rel="noopener">View</a>{% endif %}
+                    {% set view_url = job_link(job) %}
+                    {% if view_url %}<a href="{{ view_url }}" target="_blank" rel="noopener noreferrer">View</a>{% endif %}
                     {% if app_info and not app_info.similar %}
                     <button type="button" class="mini applied app-btn" data-job-id="{{ job_id }}" data-title="{{ job.title or '' }}"
                             data-applied-on="{{ app_info.applied_on }}" data-notes="{{ app_info.notes or '' }}"
@@ -378,12 +390,13 @@
             </tr>
             <tr class="details" id="details-{{ job_id }}" hidden>
                 <td></td>
-                <td colspan="9">
+                <td colspan="10">
                     <dl>
                         <div><dt>Seniority</dt><dd>{{ job.seniority_level or "-" }}</dd></div>
                         <div><dt>Employment</dt><dd>{{ job.employment_type or "-" }}</dd></div>
                         <div><dt>Industries</dt><dd>{{ job.industries or "-" }}</dd></div>
                         <div><dt>Location</dt><dd>{{ job.location or "-" }}</dd></div>
+                        <div><dt>Source</dt><dd>{{ source_label(job) }}</dd></div>
                         <div><dt>Match</dt><dd>{{ "%.1f"|format(job.match_percentage) ~ "%" if job.match_percentage is not none else "-" }}
                             ({{ job.total_matches if job.total_matches is not none else 0 }} keywords)</dd></div>
                         <div><dt>ID</dt><dd><code>{{ job_id }}</code></dd></div>

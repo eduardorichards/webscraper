@@ -1,0 +1,52 @@
+[
+ {
+  "additionalPlain": "Ofrecemos 10 días hábiles de vacaciones.",
+  "additional": "<div>Ofrecemos 10 días hábiles de vacaciones.</div>",
+  "categories": {
+   "commitment": "Full-time",
+   "location": "Capital Federal",
+   "team": "Desarrollo",
+   "allLocations": [
+    "Capital Federal"
+   ]
+  },
+  "createdAt": 1790957920025,
+  "descriptionPlain": "Somos redbee, una empresa argentina de tecnología.",
+  "description": "<div>Somos redbee, una empresa argentina de tecnología.</div>",
+  "id": "f035d332-b86e-4a9f-a6ce-6c22d8c71572",
+  "lists": [
+   {
+    "text": "Requisitos",
+    "content": "<li>Experiencia con <b>Java</b> y Spring Boot</li><li>SQL</li>"
+   }
+  ],
+  "text": "Developer Backend SSR — Java",
+  "country": "AR",
+  "workplaceType": "hybrid",
+  "hostedUrl": "https://jobs.lever.co/redbee/f035d332-b86e-4a9f-a6ce-6c22d8c71572",
+  "applyUrl": "https://jobs.lever.co/redbee/f035d332-b86e-4a9f-a6ce-6c22d8c71572/apply"
+ },
+ {
+  "additionalPlain": "",
+  "additional": "<div></div>",
+  "categories": {
+   "commitment": "Full Time",
+   "location": "Bogota",
+   "team": "QA",
+   "allLocations": [
+    "Bogota",
+    "Lima"
+   ]
+  },
+  "createdAt": 1790957920025,
+  "descriptionPlain": "Buscamos QA con Playwright.",
+  "description": "<div>Buscamos QA con Playwright.</div>",
+  "id": "0a4c8e1b-1111-4b2a-9d3e-5f6a7b8c9d0e",
+  "lists": [],
+  "text": "QA Automation Engineer",
+  "country": "CO",
+  "workplaceType": "remote",
+  "hostedUrl": "https://jobs.lever.co/redbee/0a4c8e1b-1111-4b2a-9d3e-5f6a7b8c9d0e",
+  "applyUrl": "https://jobs.lever.co/redbee/0a4c8e1b-1111-4b2a-9d3e-5f6a7b8c9d0e/apply"
+ }
+]

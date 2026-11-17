@@ -25,6 +25,9 @@ A Python application that scrapes job listings from LinkedIn based on configurab
   the "Applied" filter (default "Hide applied") also covers postings with the same title and
   company
 - Shortlist API (`GET /api/shortlist`): JSON list of the best recent jobs to apply to now
+- ATS sources: `python main.py --source ats` reads the public Greenhouse, Lever and Ashby job
+  boards of the companies in `config/companies.json`, keeps postings open to Argentina /
+  LATAM, and stores and scores them in the same database (web UI "Source" column and filter)
 - Scores record the keyword config they were computed with (`scoring_version`);
   `scripts/rescore_jobs.py` re-scores stored jobs without re-fetching
 
@@ -45,6 +48,26 @@ python main.py
 ```
 
 This executes all search templates defined in `config/settings.py` and saves results to the SQLite database.
+
+### Collect from company job boards (Greenhouse / Lever / Ashby)
+```bash
+python main.py --source ats
+```
+
+Reads only the ATS boards listed in `config/companies.json` (no LinkedIn requests): one
+request per company, 1–2 s apart (`ATS_MIN_DELAY` / `ATS_MAX_DELAY`). Each posting goes
+through the location filter (`utils/location_filter.py`): it's kept if any of its locations
+mentions Argentina, Buenos Aires, LATAM, Latin America, South America, Americas, AMER,
+Anywhere, Worldwide or Global, or if it's a bare "Remote" whose description isn't US-only;
+everything else is dropped and not stored. Kept postings not stored yet get a `job_searches`
+row (`source`, `job_url`) and are scored right away from the board's description
+(`apply_type` `external`, `posted_at` from the board), so they show up in the web UI with the
+usual filters. Each company gets a `search_runs` row (`ats:<ats>:<slug>`) and its
+`companies.last_checked_at` / `last_job_count` are updated, also on errors (404, timeout),
+which are logged and skipped. To add a company, add `{"name", "ats", "slug"}` to
+`config/companies.json`; set `"active": false` to pause one.
+
+Without `--source` (or with `--source linkedin`) `main.py` runs the LinkedIn pipeline as before.
 
 ### Run a single custom search
 ```python
@@ -89,6 +112,7 @@ the project root (see `.env.example`). Without a `.env`, the defaults below appl
 | `MAX_RETRIES` | `3` | Max retries per job on HTTP 429 |
 | `SEARCH_MIN_DELAY` / `SEARCH_MAX_DELAY` | `2` / `4` | Random delay (s) between search templates and between result pages |
 | `SEARCH_MAX_PAGES` | `4` | Result pages per search template (1–100): first page + "See more jobs" pages |
+| `ATS_MIN_DELAY` / `ATS_MAX_DELAY` | `1` / `2` | Random delay (s) between companies with `--source ats` |
 
 Relative `DB_PATH` / `LOG_DIR` resolve from the project root. Empty or unset variables use
 the default; invalid values raise `ConfigError` at startup. Real environment variables take
@@ -96,8 +120,8 @@ precedence over `.env`. `.env` is read by python-dotenv, bash `source` (`run_scr
 systemd `EnvironmentFile`, so keep it to plain `KEY=value` lines: no quotes, no inline comments,
 no `export`, no `$VAR` or `~`.
 
-Search templates, experience levels, target seniority levels, keywords and the aggregator list
-are domain config and stay in `config/`.
+Search templates, experience levels, target seniority levels, keywords, the aggregator list
+and the ATS company list are domain config and stay in `config/`.
 
 ### Pagination
 
@@ -206,12 +230,18 @@ All timestamps are UTC ISO-8601 text with seconds and a `Z` suffix, e.g. `2026-1
 | Table | One row per | Main columns |
 |-------|-------------|--------------|
 | `search_runs` | search template execution | `template_name`, `keywords`, `location`, `started_at`, `finished_at`, `jobs_found`, `new_jobs`, `status` (`ok` / `error`), `error`, `pages_fetched`, `hit_page_limit` |
-| `job_searches` | search result (a job found by a search; the same job can appear many times) | `linkedin_job_id`, `title`, `company`, `location`, `company_url`, `search_*`, `scraped_at`, `search_run_id` |
-| `job_posts` | job (details from the job page + keyword analysis) | `linkedin_job_id` (unique), `description`, `applicant_count`, `applicant_count_qualifier`, `apply_type`, `apply_url`, `seniority_level`, `date_time`, `scraped_at`, `weighted_score`, `matched_keywords`, `scoring_version`, ... |
+| `job_searches` | search result (a job found by a search; the same job can appear many times) | `linkedin_job_id`, `title`, `company`, `location`, `company_url`, `search_*`, `scraped_at`, `search_run_id`, `source`, `job_url` |
+| `job_posts` | job (details from the job page + keyword analysis) | `linkedin_job_id` (unique), `description`, `applicant_count`, `applicant_count_qualifier`, `apply_type`, `apply_url`, `seniority_level`, `date_time`, `posted_at`, `scraped_at`, `weighted_score`, `matched_keywords`, `scoring_version`, ... |
 | `blacklisted_companies` | company hidden in the web UI | `company`, `added_at` |
 | `aggregator_companies` | aggregator company (synced from `config/aggregators.json`) | `company`, `category`, `reason` |
 | `applications` | job I applied to (managed in the UI) | `linkedin_job_id` (primary key), `applied_on`, `notes`, `created_at`, `updated_at` |
+| `companies` | company whose ATS board is read (synced from `config/companies.json`) | `name`, `ats`, `slug`, `active`, `last_checked_at`, `last_job_count`, ... |
 
+- `linkedin_job_id` is the job key for every source: the numeric LinkedIn ID, or
+  `greenhouse:<slug>:<id>` / `lever:<slug>:<id>` / `ashby:<slug>:<id>` for ATS jobs
+  (helpers in `utils/job_keys.py`). `job_searches.source` is NULL for LinkedIn.
+- The `job_summary` views show `COALESCE(posted_at, date_time)` as `date_time`: the posting
+  date for ATS jobs, the analysis time for LinkedIn jobs.
 - `search_runs.new_jobs` counts jobs whose `linkedin_job_id` was not in `job_searches` before
   that run. A run with `status` NULL was interrupted before finishing.
 - `scraped_at` is NULL on rows saved before it was introduced; it is not backfilled.
@@ -296,12 +326,16 @@ curl 'http://localhost:5000/api/shortlist?since=6h&min_score=30&limit=5'
     "apply_type": "external",
     "applicant_count": 25,
     "applicant_count_qualifier": "under",
+    "source": "linkedin",
     "job_url": "https://www.linkedin.com/jobs/view/4123456789/"
   }]
 }
 ```
 
 - `total` counts all matches before `limit`; `count` is the number of jobs returned.
+- `source` is `linkedin`, `greenhouse`, `lever` or `ashby`; `job_url` is the LinkedIn job page
+  or the posting URL on the ATS board. ATS jobs are `apply_type` `external` and have no
+  applicant count.
 - `applicant_count_qualifier` is `under`, `over` or `null` (exact). A historical `25` with a
   `null` qualifier most likely means "under 25".
 

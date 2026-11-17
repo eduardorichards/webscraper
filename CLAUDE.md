@@ -1,7 +1,7 @@
 # LinkedIn Job Scraper - Claude Code Context
 
 ## Project Overview
-A Python-based LinkedIn job scraper that searches for job listings, extracts data, stores results in SQLite, and ranks jobs by keyword matching. Designed for tracking junior developer positions in Argentina and Latin America.
+A Python-based LinkedIn job scraper that searches for job listings, extracts data, stores results in SQLite, and ranks jobs by keyword matching. Designed for tracking junior developer positions in Argentina and Latin America. A second collector reads the public Greenhouse / Lever / Ashby job boards of a curated company list into the same tables (see "ATS sources").
 
 ## Quick Start
 ```bash
@@ -9,6 +9,13 @@ A Python-based LinkedIn job scraper that searches for job listings, extracts dat
 python main.py
 ```
 `main.py` calls `setup_logging()`, then runs `multiple_search()` followed by `analyze_keywords()` in sequence. Logs go to both stdout and `data/logs/scraper.log`.
+
+```bash
+# ATS boards only (Greenhouse / Lever / Ashby, config/companies.json); no LinkedIn requests
+python main.py --source ats
+```
+`--source linkedin` is the default (the pipeline above, unchanged). Not in cron yet; meant to
+run daily.
 
 ## Development Notes
 
@@ -44,6 +51,7 @@ python main.py
 | `MAX_RETRIES` | `3` | Max retries per job on HTTP 429 |
 | `SEARCH_MIN_DELAY` / `SEARCH_MAX_DELAY` | `2` / `4` | Random delay (s) between search templates and between result pages |
 | `SEARCH_MAX_PAGES` | `4` | Result pages per search template (1–100): first page + "See more jobs" pages |
+| `ATS_MIN_DELAY` / `ATS_MAX_DELAY` | `1` / `2` | Random delay (s) between companies with `--source ats` |
 
 Relative `DB_PATH` / `LOG_DIR` resolve from the project root. Empty or unset variables use
 the default; invalid values raise `ConfigError` at startup. Real environment variables take
@@ -54,7 +62,7 @@ no `export`, no `$VAR` or `~`.
 ## Project Structure
 ```
 Job Scraper/
-├── main.py                      # Entry point - runs search + analysis pipeline
+├── main.py                      # Entry point - search + analysis pipeline; --source ats
 ├── web_app.py                   # Flask web interface for viewing results
 ├── run_scraper.sh               # Cron wrapper (lock file, virtualenv, logging)
 ├── deploy.sh                    # Server-side deploy (SSH forced command from CI)
@@ -67,7 +75,8 @@ Job Scraper/
 │   ├── env.py                   # Environment config (env vars / .env, validated)
 │   ├── settings.py              # Search templates, headers, mappings, seniority targets
 │   ├── keyword_settings.py      # Keywords, weights, user agents
-│   └── aggregators.json         # Aggregator companies (category, reason)
+│   ├── aggregators.json         # Aggregator companies (category, reason)
+│   └── companies.json           # ATS boards to read (name, ats, slug, ...)
 ├── scraper/
 │   ├── models/
 │   │   ├── job.py               # Job data model
@@ -81,14 +90,20 @@ Job Scraper/
 │   │   └── keyword_matcher.py   # KeywordMatcher - analysis orchestrator
 │   ├── extractors/
 │   │   └── linkedin_extractor.py # LinkedInExtractor - search page parsing
-│   └── analyzers/
-│       └── keyword_analyzer.py  # KeywordAnalyzer - regex matching
+│   ├── analyzers/
+│   │   └── keyword_analyzer.py  # KeywordAnalyzer - regex matching
+│   └── sources/
+│       ├── ats_client.py        # fetch_board(), parse_greenhouse/lever/ashby() → AtsJob
+│       └── ats_collector.py     # collect_ats(): runs, location filter, store + score
 ├── scripts/
 │   ├── backfill_apply_type.py   # One-off apply_type backfill (fetches LinkedIn)
 │   └── rescore_jobs.py          # Re-score stored descriptions (no fetching)
 ├── utils/
 │   ├── sqlite_storage.py        # SQLiteStorage class (schema + migrations)
 │   ├── aggregators.py           # load_aggregators() for config/aggregators.json
+│   ├── companies.py             # load_companies() for config/companies.json
+│   ├── job_keys.py              # Job keys per source, source_of(), job_url_for()
+│   ├── location_filter.py       # check_location() for ATS postings (AR / LATAM)
 │   ├── seniority.py             # levels_above() for "Hide above my level"
 │   └── time_utils.py            # utc_now_iso() timestamp helper
 ├── data/
@@ -113,8 +128,15 @@ Job Scraper/
     ├── test_shortlist.py        # /api/shortlist params, fixed filters, ordering, limit
     ├── test_seniority.py        # "Above my level" rule
     ├── test_scoring_version.py  # scoring_version hash, rescore script
+    ├── test_job_keys.py         # Key format, source_of(), job_url_for()
+    ├── test_location_filter.py  # Allowlist, bare "Remote" vs US-only descriptions
+    ├── test_ats_client.py       # Greenhouse/Lever/Ashby parsing, dates, fetch errors
+    ├── test_companies.py        # companies.json validation, table sync keeps check stats
+    ├── test_ats_collector.py    # Collection into the DB, runs, skips; LinkedIn flow,
+    │                            # web UI, applications, shortlist, backfill with ATS keys
     ├── fixtures/                # Trimmed logged-out pages: job pages (easy apply, external,
-    │                            # criteria), search page, "See more jobs" page
+    │                            # criteria), search page, "See more jobs" page; trimmed
+    │                            # Greenhouse / Lever / Ashby board responses (*.json)
     └── test_env.py              # config/env.py tests
 ```
 
@@ -124,7 +146,8 @@ Job Scraper/
 - **`Job`**: Represents a job listing with title, company, location, posted_date, job_url
 - **`SearchConfig`**: Search parameters - keywords, location, time_posted, remote, experience_levels, max_results
 - **`KeywordConfig`**: Keywords to match with optional weights for scoring
-- **`MatchResult`**: Stores keyword match analysis results per job
+- **`MatchResult`**: Stores keyword match analysis results per job; `job_url` is built from
+  the key (LinkedIn) or `source_url` (other sources)
 
 ### Core
 - **`JobScraper`**: Main search orchestrator - builds URLs, fetches the search page and "See more
@@ -141,8 +164,15 @@ Job Scraper/
 
 ### Storage
 - **`SQLiteStorage`**: Primary storage (`search_runs`, `job_searches`, `job_posts`,
-  `blacklisted_companies`, `aggregator_companies`, `applications`); creates and migrates the
-  schema and syncs the aggregator list on init
+  `blacklisted_companies`, `aggregator_companies`, `applications`, `companies`); creates and
+  migrates the schema and syncs the aggregator and company lists on init
+
+### ATS sources (`scraper/sources/`)
+- **`AtsJob`**: normalized posting (key, source, slug, company, title, locations,
+  description, job_url, apply_url, posted_at, employment_type, remote)
+- **`fetch_board(company)`**: one GET per board; raises `AtsError` on HTTP errors, timeouts
+  and bad payloads; an empty board returns `[]`
+- **`collect_ats(storage, keyword_config)`**: per company, run → filter → store → score
 
 ## Data Flow
 
@@ -163,11 +193,26 @@ main.py → multiple_search()
                                                  pages_fetched, hit_page_limit]
 ```
 
+### ATS Collection Flow
+```
+main.py --source ats → collect_ats_jobs() → collect_ats(storage, keyword_config)
+  → for each active row of companies (data-file order), ATS_*_DELAY between companies:
+    → start_search_run("ats:<ats>:<slug>", "ats", slug)
+    → fetch_board(company)                      [15 s timeout; AtsError → run 'error']
+    → for each posting: check_location()        [dropped: not stored]
+      → skip if the key is in job_searches or job_posts (never re-scored)
+      → add_ats_job()                           [job_searches row: source, job_url]
+      → aggregator company: stop here (no job_posts row, like LinkedIn)
+      → score_job() + save_job_analysis()       [apply_type 'external', posted_at]
+    → finish_search_run(jobs_found=postings returned, new_jobs=stored, pages_fetched=1)
+    → mark_company_checked(name, postings returned; 0 on errors)
+```
+
 ### Keyword Analysis Flow
 ```
 main.py → analyze_keywords(since=<pipeline start>)
   → KeywordMatcher.analyze_jobs(since)
-    → SQLiteStorage.get_jobs_without_analysis() [excludes aggregator_companies]
+    → SQLiteStorage.get_jobs_without_analysis() [LinkedIn IDs only; excludes aggregator_companies]
     → log "Skipped N detail fetches for aggregator companies"
                                                 [count_skipped_aggregator_jobs(since)]
     → For each job:
@@ -235,6 +280,33 @@ twice, `"<Group> AR"` (location Argentina, `remote` False) and `"<Group> LATAM"`
   matched by exact company name. Industry/name-pattern rules were deliberately left out.
 - Don't import from `analysis/` (it's moving to its own repo); edit the JSON instead.
 
+### ATS sources (`config/companies.json`)
+- Entries: `name` (stored as `job_searches.company`, so blacklist/aggregator matching uses
+  it), `ats` (`greenhouse` / `lever` / `ashby`), `slug`, optional `priority`,
+  `hires_in_ar`, `notes`, `active` (default true). Synced into `companies` on every init.
+- APIs (public, no auth; User-Agent `ats_client.USER_AGENT`):
+  - Greenhouse `https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true`:
+    `content` is HTML-escaped HTML; posted = `first_published`, else `updated_at`;
+    locations = `location.name` + `offices[].location` + `offices[].name`. Also serves
+    EU-hosted boards (Valtech); `boards-api.eu.greenhouse.io` doesn't resolve (2026-11-17).
+  - Lever `https://api.lever.co/v0/postings/{slug}?mode=json`: description =
+    `descriptionPlain` + `lists[]` (header + HTML stripped) + `additionalPlain`; posted =
+    `createdAt` (ms); locations = `categories.location` + `allLocations`, plus "Argentina"
+    when `country` is `AR`.
+  - Ashby `https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true`:
+    locations = `location` + `secondaryLocations[].location`; unlisted postings skipped.
+- `employment_type` is mapped to LinkedIn's names (`Full-time`, `Part-time`, `Contract`,
+  `Internship`, `Temporary`); anything else (Lever's free-text commitments) → NULL.
+- Location filter (`utils/location_filter.py`), first match wins:
+  1. any location matches the allowlist (whole words, case/accent-insensitive): Argentina,
+     Buenos Aires, CABA, Capital Federal, LATAM, Latin America, Latinoamérica, South
+     America, Americas, AMER, Anywhere, Worldwide, Global ("Anywhere in X" counts as X) → keep;
+  2. bare "Remote" (or no location on a remote posting) → keep unless the description is
+     US-only ("based in the US", "US-based", "U.S. only", "authorized to work in the United
+     States", "must reside in the US"...);
+  3. anything else (other countries/cities, "Remote - US") → drop, not stored.
+- Checked 2026-11-17: `stensul` → 404, `webflow` → empty board (kept in the list).
+
 ### Keyword Settings (`config/keyword_settings.py`)
 ```python
 USER_AGENTS = [...]       # user-agent rotation pool
@@ -289,7 +361,8 @@ CREATE TABLE search_runs (
 
 ### job_searches table
 One row per search hit — the same `linkedin_job_id` can appear many times (once per
-search template that found it).
+search template that found it). ATS jobs get one row (first collection), with
+`search_keywords = 'ats'` and `search_location = <slug>`.
 ```sql
 CREATE TABLE job_searches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -303,7 +376,9 @@ CREATE TABLE job_searches (
     search_experience TEXT,
     search_remote TEXT,
     scraped_at TEXT,                   -- UTC, when the search page was fetched (NULL on old rows)
-    search_run_id INTEGER REFERENCES search_runs(id)  -- NULL on old rows
+    search_run_id INTEGER REFERENCES search_runs(id),  -- NULL on old rows
+    source TEXT,                       -- NULL = LinkedIn; 'greenhouse' | 'lever' | 'ashby'
+    job_url TEXT                       -- posting URL for non-LinkedIn jobs; NULL for LinkedIn
 )
 -- INDEX idx_job_searches_linkedin_id ON job_searches(linkedin_job_id)
 -- INDEX idx_job_searches_run         ON job_searches(search_run_id)
@@ -329,8 +404,9 @@ CREATE TABLE job_posts (
     applicant_count_qualifier TEXT,    -- 'under' | 'over' | NULL (exact)
     apply_type TEXT,                   -- 'easy_apply' | 'external' | NULL (unknown)
     apply_url TEXT,                    -- external apply URL; currently always NULL (see below)
-    scoring_version TEXT               -- KeywordConfig.scoring_version() of the score; NULL if
+    scoring_version TEXT,              -- KeywordConfig.scoring_version() of the score; NULL if
                                        -- scored before versioning or nothing scored
+    posted_at TEXT                     -- posting date from the source (ATS jobs); NULL for LinkedIn
 )
 -- INDEX idx_job_posts_score    ON job_posts(weighted_score DESC)
 -- INDEX idx_job_posts_datetime ON job_posts(date_time DESC)
@@ -379,6 +455,15 @@ apply controls (verified against logged-in pages on 2026-11-14):
 - Migration doesn't backfill; `scripts/backfill_apply_type.py` can fill recent rows (see
   "Common Tasks"). Web UI filter: `?apply=easy_apply|external|unknown`
   (`unknown` = `apply_type IS NULL`, which includes all rows analyzed before the column existed).
+
+### Job keys (`utils/job_keys.py`)
+`linkedin_job_id` is the job key for every source (not renamed). LinkedIn keys are the
+numeric ID; ATS keys are `greenhouse:{slug}:{id}`, `lever:{slug}:{id}`, `ashby:{slug}:{id}`.
+Use the helpers instead of parsing keys: `is_linkedin_key()` (no `:`; SQL:
+`LINKEDIN_KEY_SQL`), `source_of()`, `is_valid_key()` (API validation), `make_key()`,
+`job_url_for(key, stored_url)` (LinkedIn URL from the ID, else `job_searches.job_url`).
+Anything that fetches LinkedIn (`_PENDING_JOBS_SQL`, `backfill_apply_type.py`) only selects
+LinkedIn keys.
 
 ### Job IDs
 `LinkedInExtractor` takes `linkedin_job_id` from the card's `data-entity-urn`
@@ -437,9 +522,27 @@ CREATE TABLE aggregator_companies (
   `job_posts` row (so they don't appear in the UI even with the filter off).
   `count_skipped_aggregator_jobs(since)` counts pending ones first seen at/after `since`.
 
+### companies table
+Synced from `config/companies.json` on every init (inserts/updates config fields, deletes
+unlisted companies); the sync never touches `last_checked_at` / `last_job_count`.
+```sql
+CREATE TABLE companies (
+    name TEXT PRIMARY KEY,
+    ats TEXT NOT NULL,                 -- greenhouse | lever | ashby
+    slug TEXT NOT NULL,
+    priority TEXT,
+    hires_in_ar TEXT,
+    notes TEXT,
+    active INTEGER DEFAULT 1,
+    last_checked_at TEXT,              -- UTC ISO-8601, last board read (also on errors)
+    last_job_count INTEGER             -- postings returned (before the location filter); 0 on errors
+)
+```
+
 ### applications table
 Jobs I applied to, managed via `/api/applications` (GET list; POST upsert
-`{linkedin_job_id, applied_on?, notes?}`; DELETE `{linkedin_job_id}`). POST requires an
+`{linkedin_job_id, applied_on?, notes?}`; DELETE `{linkedin_job_id}`; the key is a numeric
+LinkedIn ID or an ATS key). POST requires an
 existing `job_posts` row (404 otherwise), `applied_on` as `YYYY-MM-DD` (default: server's
 today; the UI sends the browser's local date) and notes up to 2,000 characters.
 ```sql
@@ -461,7 +564,9 @@ CREATE TABLE applications (
   linkedin_job_id` (one row per job). Columns: `linkedin_job_id, title, company, location,
   date_time, applicant_count, weighted_score, match_percentage, total_matches,
   matched_keywords, apply_type, apply_url, seniority_level, applicant_count_qualifier,
-  employment_type, industries`. `description` is deliberately left out (it would be carried
+  employment_type, industries, source, job_url`. `date_time` is
+  `COALESCE(posted_at, date_time)`: the posting date for ATS jobs (so a first collection
+  doesn't show months-old postings as new), analysis time for LinkedIn. `description` is deliberately left out (it would be carried
   through the window function); the UI fetches `SUBSTR(description, 1, 500)` for the current
   page only (`get_description_snippets()`).
 - **`job_summary_unique`**: same columns; keeps at most 2 rows per `(title, company)`,
@@ -470,7 +575,7 @@ CREATE TABLE applications (
   (~0.35 s on ~100k jobs).
 
 ### Timestamp format
-`job_posts.date_time`, all `scraped_at` columns and the `search_runs` timestamps are stored as
+`job_posts.date_time` / `posted_at`, all `scraped_at` columns and the `search_runs` timestamps are stored as
 UTC ISO-8601 text with seconds and a `Z` suffix, e.g. `2026-10-07T22:11:34Z` (may be NULL).
 Generate them with `utils.time_utils.utc_now_iso()`. Compare against them with the same format:
 ```sql
@@ -495,6 +600,7 @@ Exception: `applications.applied_on` is a plain `YYYY-MM-DD` local date.
 | `under25=1` | `applicant_count < 25`, or `25` with qualifier `under` or NULL (historical) |
 | `apply` | `easy_apply` / `external` / `unknown` |
 | `applied` | `hide` (default) / `only` / `all` (see "applications table") |
+| `source` | `linkedin` (`source IS NULL`) / `greenhouse` / `lever` / `ashby` |
 | `hide_blacklisted`, `hide_aggregators`, `hide_above_level` | on (`1`) by default |
 | `sort`, `dir`, `page`, `per_page` | sorting / pagination |
 
@@ -513,11 +619,12 @@ Exception: `applications.applied_on` is a plain `YYYY-MM-DD` local date.
   `{"error", "invalid": {param: message}}`. Fixed: `hide_blacklisted`, `hide_aggregators`,
   `hide_above_level`, `applied='hide'`; `job_summary_unique` sorted by `weighted_score` desc.
   Response: `params` (effective), `total` (before limit), `count`, `jobs` (fields in
-  `SHORTLIST_FIELDS`, `matched_keywords` as a list, plus `job_url`
-  `https://www.linkedin.com/jobs/view/<id>/`).
+  `SHORTLIST_FIELDS`, `matched_keywords` as a list, plus `source` and `job_url`
+  (`job_url_for()`: `https://www.linkedin.com/jobs/view/<id>/` or the stored ATS URL)).
+- "View" links and the Source column use `job_link()` / `source_label()` (template globals).
 - Styling: Pico CSS, no `data-theme` (follows the OS light/dark setting). Use Pico variables
   (`--pico-*`) for every color, never hex/rgb (`test_no_light_theme_or_hardcoded_colors`).
-  Below 1100px the Location and Match columns are hidden (both are in the expanded row).
+  Below 1100px the Location, Source and Match columns are hidden (all in the expanded row).
   No overflow wrapper around the table, which would break the sticky header.
 
 ## LinkedIn HTML Selectors
@@ -573,6 +680,7 @@ python -m scripts.backfill_apply_type --since 12h --min-score 5 --limit 50
   newest first, at most `--limit` (default 300).
 - Uses `DetailScraper` as is (headers, delays, batch pauses, 429 retries). Each update is
   written immediately with `WHERE apply_type IS NULL`, so it never overwrites a value.
+- LinkedIn keys only (numeric); ATS jobs are saved with `apply_type = 'external'`.
 - Closed jobs, pages without a marker and failed fetches stay NULL, so every run re-fetches
   them (bounded by `--since` / `--limit`).
 - Stops after 5 consecutive failed fetches (exit 1): `DetailScraper` doesn't wait after
@@ -593,6 +701,7 @@ python -m scripts.rescore_jobs             # re-score them (batches of 500, one 
 python -m scripts.rescore_jobs --all --limit 1000
 ```
 - Rows without a description (failed/closed fetches) are skipped and keep a NULL version.
+- ATS jobs are re-scored too (their description comes from the board API).
 - Idempotent: a second run finds nothing to do. ~100k rows ≈ 2–3 min (local copy, 2026-11-14).
 
 ### Export to CSV (one-liner)

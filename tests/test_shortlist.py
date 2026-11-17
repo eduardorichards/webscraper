@@ -117,6 +117,7 @@ class TestShortlist(unittest.TestCase):
             'apply_type': 'external',
             'applicant_count': 25,
             'applicant_count_qualifier': 'under',
+            'source': 'linkedin',
             'job_url': 'https://www.linkedin.com/jobs/view/4000000002/',
         })
         self.assertRegex(job['date_time'], r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$')
