@@ -1,9 +1,7 @@
 {
   "_comment": "Companies whose public ATS job boards are read by `python main.py --source ats`. ats: greenhouse | lever | ashby; slug: the board name in the API URL; EU-hosted Greenhouse boards (e.g. Valtech, job-boards.eu.greenhouse.io) are served by the same API host; boards-api.eu.greenhouse.io does not resolve (checked 2026-11-17). name is the display/company name stored in job_searches.company (blacklist and aggregator matching use it). Set active to false to stop reading a board without losing its history. Synced into the companies table on every SQLiteStorage init.",
   "companies": [
-    {"name": "Webflow", "ats": "greenhouse", "slug": "webflow"},
     {"name": "Greenhouse", "ats": "greenhouse", "slug": "greenhouse"},
-    {"name": "Stensul", "ats": "greenhouse", "slug": "stensul"},
     {"name": "Nimble Gravity", "ats": "greenhouse", "slug": "nimblegravity"},
     {"name": "Webstacks", "ats": "greenhouse", "slug": "webstacks"},
     {"name": "GitLab", "ats": "greenhouse", "slug": "gitlab"},
@@ -18,6 +16,8 @@
     {"name": "Ramp", "ats": "ashby", "slug": "ramp"},
     {"name": "Kraken", "ats": "ashby", "slug": "kraken.com"},
     {"name": "ElevenLabs", "ats": "ashby", "slug": "elevenlabs"},
-    {"name": "Supabase", "ats": "ashby", "slug": "supabase"}
+    {"name": "Supabase", "ats": "ashby", "slug": "supabase"},
+    {"name": "Webflow", "ats": "ashby", "slug": "webflow", "notes": "Moved from Greenhouse (board empty) to Ashby; checked 2026-11-17"},
+    {"name": "Stensul", "ats": "ashby", "slug": "stensul", "notes": "Moved from Greenhouse (API 404) to Ashby; checked 2026-11-17"}
   ]
 }

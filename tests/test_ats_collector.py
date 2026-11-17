@@ -58,8 +58,8 @@ class AtsDbTestCase(unittest.TestCase):
         {"name": "Kraken", "ats": "ashby", "slug": "kraken.com"},
         {"name": "GitLab", "ats": "greenhouse", "slug": "gitlab"},
         {"name": "redbee", "ats": "lever", "slug": "redbee"},
-        {"name": "Gone", "ats": "greenhouse", "slug": "stensul"},
-        {"name": "Empty", "ats": "greenhouse", "slug": "webflow"},
+        {"name": "Gone", "ats": "greenhouse", "slug": "gone-board"},
+        {"name": "Empty", "ats": "greenhouse", "slug": "empty-board"},
     ]
 
     def setUp(self):
@@ -78,7 +78,7 @@ class AtsDbTestCase(unittest.TestCase):
             board_url('ashby', 'kraken.com'): (200, _load('ashby_job_board.json')),
             board_url('greenhouse', 'gitlab'): (200, _load('greenhouse_jobs.json')),
             board_url('lever', 'redbee'): (200, _load('lever_postings.json')),
-            board_url('greenhouse', 'webflow'): (200, {"jobs": [], "meta": {"total": 0}}),
+            board_url('greenhouse', 'empty-board'): (200, {"jobs": [], "meta": {"total": 0}}),
         })
 
     def _storage(self):
@@ -183,8 +183,8 @@ class TestCollect(AtsDbTestCase):
             ('ats:ashby:kraken.com', 'ats', 'kraken.com', 4, 2, 'ok', None, 1, 1),
             ('ats:greenhouse:gitlab', 'ats', 'gitlab', 3, 1, 'ok', None, 1, 1),
             ('ats:lever:redbee', 'ats', 'redbee', 2, 1, 'ok', None, 1, 1),
-            ('ats:greenhouse:stensul', 'ats', 'stensul', 0, 0, 'error', 'HTTP 404', 1, 1),
-            ('ats:greenhouse:webflow', 'ats', 'webflow', 0, 0, 'ok', None, 1, 1),
+            ('ats:greenhouse:gone-board', 'ats', 'gone-board', 0, 0, 'error', 'HTTP 404', 1, 1),
+            ('ats:greenhouse:empty-board', 'ats', 'empty-board', 0, 0, 'ok', None, 1, 1),
         ])
         companies = self._query(
             "SELECT name, last_job_count, last_checked_at IS NOT NULL FROM companies"

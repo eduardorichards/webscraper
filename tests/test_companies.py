@@ -26,9 +26,14 @@ class TestDataFile(unittest.TestCase):
         self.assertEqual(COMPANIES_FILE, PROJECT_ROOT / "config" / "companies.json")
         boards = {(e["ats"], e["slug"]): e for e in entries}
         self.assertEqual(len(entries), 18)
-        self.assertEqual(sum(e["ats"] == "greenhouse" for e in entries), 7)
+        self.assertEqual(sum(e["ats"] == "greenhouse" for e in entries), 5)
         self.assertEqual(sum(e["ats"] == "lever" for e in entries), 7)
-        self.assertEqual(sum(e["ats"] == "ashby" for e in entries), 4)
+        self.assertEqual(sum(e["ats"] == "ashby" for e in entries), 6)
+        # Moved from Greenhouse to Ashby (Greenhouse: empty board / 404)
+        self.assertEqual(boards[("ashby", "webflow")]["name"], "Webflow")
+        self.assertEqual(boards[("ashby", "stensul")]["name"], "Stensul")
+        self.assertNotIn(("greenhouse", "webflow"), boards)
+        self.assertNotIn(("greenhouse", "stensul"), boards)
         self.assertEqual(boards[("lever", "tryjeeves")]["name"], "Jeeves")
         self.assertEqual(boards[("ashby", "kraken.com")]["name"], "Kraken")
         self.assertTrue(all(e["active"] for e in entries))
@@ -92,6 +97,19 @@ class TestCompaniesSync(unittest.TestCase):
              checked_at, 95),
             ("redbee", "lever", "redbee", None, 1, None, None),
         ])
+
+    def test_sync_company_moved_to_another_ats(self):
+        _write_file(self.file, [{"name": "Webflow", "ats": "greenhouse", "slug": "webflow"}])
+        storage = self._open()
+        storage.mark_company_checked("Webflow", 0)
+        checked_at = self._rows()[0][5]
+        _write_file(self.file, [{"name": "Webflow", "ats": "ashby", "slug": "webflow",
+                                 "notes": "moved"}])
+        storage = self._open()
+        self.assertEqual(self._rows(),
+                         [("Webflow", "ashby", "webflow", "moved", 1, checked_at, 0)])
+        self.assertEqual([(c["ats"], c["slug"]) for c in storage.get_companies()],
+                         [("ashby", "webflow")])
 
     def test_sync_adds_and_removes(self):
         _write_file(self.file, [{"name": "A", "ats": "lever", "slug": "a"},

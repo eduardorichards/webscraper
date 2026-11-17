@@ -305,7 +305,9 @@ twice, `"<Group> AR"` (location Argentina, `remote` False) and `"<Group> LATAM"`
      US-only ("based in the US", "US-based", "U.S. only", "authorized to work in the United
      States", "must reside in the US"...);
   3. anything else (other countries/cities, "Remote - US") → drop, not stored.
-- Checked 2026-11-17: `stensul` → 404, `webflow` → empty board (kept in the list).
+- A board that suddenly returns 404 or an empty list may have moved to another ATS: check the
+  company's careers page for the board it embeds (2026-11-17: Webflow and Stensul had moved
+  from Greenhouse to Ashby, same slugs). The `ats:<ats>:<slug>` runs keep the history.
 
 ### Keyword Settings (`config/keyword_settings.py`)
 ```python
