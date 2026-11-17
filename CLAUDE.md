@@ -99,6 +99,8 @@ Job Scraper/
     ├── test_sqlite_storage.py   # Storage tests
     ├── test_migrations.py       # Schema migration idempotency
     ├── test_search_runs.py      # search_runs tracking (HTTP mocked)
+    ├── test_search_templates.py # SEARCH_TEMPLATES structure (AR/LATAM pairs, levels, no OR)
+    ├── test_keyword_settings.py # Weight keys match keywords; no case-insensitive duplicates
     ├── test_applicant_parsing.py # Applicant caption parsing
     ├── test_apply_detection.py  # Apply type / closed-job detection (uses fixtures/)
     ├── test_web_app.py          # Web UI filters, chips, presentation, applications API
@@ -181,10 +183,27 @@ main.py → analyze_keywords(since=<pipeline start>)
 ## Configuration
 
 ### Search Templates (`config/settings.py`)
-12 predefined searches in `SEARCH_TEMPLATES` list with:
-- `keywords`, `location`, `experience_levels`, `remote`, `time_posted`, `max_results`
-- `time_posted` is set to `"1h"` (last hour) for hourly cron runs
+24 searches in `SEARCH_TEMPLATES`, built by `_search_pair(group, keywords)`: each group runs
+twice, `"<Group> AR"` (location Argentina, `remote` False) and `"<Group> LATAM"` (Latin America,
+`remote` True). List order = priority (`multiple_search()` runs them top to bottom):
+
+| Tier | Groups (one keyword each) |
+|---|---|
+| 1 | Java, QA Automation, Automatizador, AI Engineer, LLM, Backend |
+| 2 | Python, AWS, Playwright |
+| 3 | Fullstack, Software Developer, DevOps |
+
+- One term per template, no quotes: the logged-out search doesn't honor `OR` (2026-11-17:
+  `"QA Automation" OR SDET` → 4,000+ results vs 7,000+ for `SDET` alone). Its matching is fuzzy,
+  so a term also surfaces close variants (`SDET` → "QA Automation" titles), which is why
+  Spring Boot, SDET, Test Automation, Selenium, Serverless, etc. have no template of their own.
+- `experience_levels` `[1, 2, 3]` (matches `TARGET_SENIORITY_LEVELS`; LinkedIn barely enforces it)
+- `time_posted` is `"2h"`, twice the hourly cron interval, so consecutive runs overlap (see "Cron")
 - `max_results` (250) caps the whole run across pages
+- Worst case per run: 24 × `SEARCH_MAX_PAGES` (4) = 96 search requests, ~7 min of search
+  delays; most templates return < 60 cards in two hours, so usually ~24–30. Detail requests are
+  separate (one per new job).
+- Covered by `tests/test_search_templates.py`.
 
 ### Pagination (`config/settings.py`)
 - `LINKEDIN_SEE_MORE_URL`: guest endpoint behind "See more jobs"
@@ -710,6 +729,14 @@ crontab -e
 0 * * * * /home/edu/job-scraper/run_scraper.sh
 ```
 `run_scraper.sh` loads `.env` (if present), activates the virtualenv, acquires a PID lock, runs `main.py`, and logs to `$LOG_DIR/cron.log`.
+
+The searches use `time_posted="2h"`, twice the cron interval. With `"1h"` there was no overlap,
+so a posting was missed whenever a template's next run started more than an hour after its last
+one (random delays, 429 waits), a run was skipped because the previous one (or the backfill)
+held the lock, or LinkedIn indexed a posting late. The overlap costs no detail requests
+(`get_jobs_without_analysis()` only returns IDs without a `job_posts` row), but each repeat hit
+adds a `job_searches` row (~2.85 rows per job before the change, 428k rows / 83 MB locally).
+Two consecutive skipped runs can still leave a gap.
 
 ### systemd (Flask web app)
 ```bash

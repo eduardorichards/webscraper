@@ -94,116 +94,44 @@ DEFAULT_MAX_JOBS = 50
 DEFAULT_PROCESSING_LIMIT = 100
 
 
+def _search_pair(group, keywords):
+    """One search group run twice: Argentina (any work mode) and Latin America remote."""
+    common = {
+        "keywords": keywords,
+        "experience_levels": [1, 2, 3],  # Internship, Entry level, Associate
+        # Twice the hourly cron interval, so consecutive runs overlap: a posting
+        # isn't lost to a late or skipped run. Repeat hits only add job_searches
+        # rows; jobs that already have a job_posts row aren't fetched again.
+        "time_posted": "2h",
+        "max_results": 250,
+    }
+    return [
+        dict(common, name=f"{group} AR", location="Argentina", remote=False),
+        dict(common, name=f"{group} LATAM", location="Latin America", remote=True),
+    ]
+
+
+# List order = priority: main.multiple_search() runs them top to bottom.
+# One term per template: the logged-out search doesn't honor OR (checked
+# 2026-11-17: '"QA Automation" OR SDET' returned 4,000+ results vs 7,000+ for
+# SDET alone), and its matching is fuzzy enough that a term also surfaces
+# close variants (SDET -> "QA Automation", "Software Engineer in Test").
 SEARCH_TEMPLATES = [
-        {
-        "name": "Developer Arg Jr",
-        "keywords": "Junior Developer",
-        "location": "Argentina",
-        "experience_levels": [1, 2],
-        "remote": False,
-        "time_posted": "1h",
-        "max_results": 250
-    },
-    {
-        "name": "Java Arg Jr",
-        "keywords": "Java",
-        "location": "Argentina",
-        "experience_levels": [1, 2],
-        "remote": False,
-        "time_posted": "1h",
-        "max_results": 250
-    },
-    {
-        "name": "Python Arg Jr",
-        "keywords": "Python",
-        "location": "Argentina",
-        "experience_levels": [1, 2],
-        "remote": False,
-        "time_posted": "1h",
-        "max_results": 250
-    },    
-    {
-        "name": "Backend Arg Jr Remote",
-        "keywords": "Backend",
-        "location": "Argentina",
-        "experience_levels": [1, 2],
-        "remote": False,
-        "time_posted": "1h",
-        "max_results": 250
-    },
-    {
-        "name": "Software Developer Arg Jr Remote",
-        "keywords": "Software Developer",
-        "location": "Argentina",
-        "experience_levels": [1, 2],
-        "remote": False,
-        "time_posted": "1h",
-        "max_results": 250
-    },
-    {
-        "name": "Fullstack Arg Jr Remote",
-        "keywords": "Fullstack",
-        "location": "Argentina",
-        "experience_levels": [1, 2],
-        "remote": False,
-        "time_posted": "1h",
-        "max_results": 250
-    },
-    {
-        "name": "Java Latam Remote",
-        "keywords": "Java",
-        "location": "Latin America",
-        "experience_levels": [1, 2],
-        "remote": True,
-        "time_posted": "1h",
-        "max_results": 250
-    },
-    {
-        "name": "Python Latam Remote",
-        "keywords": "Python",
-        "location": "Latin America",
-        "experience_levels": [1, 2],
-        "remote": True,
-        "time_posted": "1h",
-        "max_results": 250
-    },    
-    {
-        "name": "Backend Latam Remote",
-        "keywords": "Backend",
-        "location": "Latin America",
-        "experience_levels": [1, 2],
-        "remote": True,
-        "time_posted": "1h",
-        "max_results": 250
-    },
-    {
-        "name": "Software Developer Latam Remote",
-        "keywords": "Software Developer",
-        "location": "Latin America",
-        "experience_levels": [1, 2],
-        "remote": True,
-        "time_posted": "1h",
-        "max_results": 250
-    },
-    {
-        "name": "Fullstack Latam Remote",
-        "keywords": "Fullstack",
-        "location": "Latin America",
-        "experience_levels": [1, 2],
-        "remote": True,
-        "time_posted": "1h",
-        "max_results": 250
-    },
-    {
-        "name": "Developer Jr Latam Remote",
-        "keywords": "Junior Developer",
-        "location": "Latin America",
-        "experience_levels": [1, 2],
-        "remote": True,
-        "time_posted": "1h",
-        "max_results": 250
-    },
-    
+    # --- Tier 1: Java backend, QA automation, AI/LLM, backend ---
+    *_search_pair("Java", "Java"),
+    *_search_pair("QA Automation", "QA Automation"),
+    *_search_pair("Automatizador", "Automatizador"),
+    *_search_pair("AI Engineer", "AI Engineer"),
+    *_search_pair("LLM", "LLM"),
+    *_search_pair("Backend", "Backend"),
+    # --- Tier 2: Python, AWS, testing tools ---
+    *_search_pair("Python", "Python"),
+    *_search_pair("AWS", "AWS"),
+    *_search_pair("Playwright", "Playwright"),
+    # --- Tier 3: fullstack, generic, DevOps ---
+    *_search_pair("Fullstack", "Fullstack"),
+    *_search_pair("Software Developer", "Software Developer"),
+    *_search_pair("DevOps", "DevOps"),
 ]
 
 
