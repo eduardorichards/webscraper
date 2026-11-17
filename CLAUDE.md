@@ -14,8 +14,8 @@ python main.py
 # ATS boards only (Greenhouse / Lever / Ashby, config/companies.json); no LinkedIn requests
 python main.py --source ats
 ```
-`--source linkedin` is the default (the pipeline above, unchanged). Not in cron yet; meant to
-run daily.
+`--source linkedin` is the default (the pipeline above, unchanged). Meant to run daily from
+cron via `run_scraper.sh --source ats` (see "Cron").
 
 ## Development Notes
 
@@ -137,6 +137,7 @@ Job Scraper/
     ├── fixtures/                # Trimmed logged-out pages: job pages (easy apply, external,
     │                            # criteria), search page, "See more jobs" page; trimmed
     │                            # Greenhouse / Lever / Ashby board responses (*.json)
+    ├── test_run_scraper.py      # Cron wrapper: argument forwarding, log lines, shared lock
     └── test_env.py              # config/env.py tests
 ```
 
@@ -843,13 +844,26 @@ mkdir -p data/database data/logs
 cp .env.example .env   # optional; edit to override defaults
 ```
 
-### Cron (hourly scraper)
+### Cron (hourly scraper, daily ATS boards)
 ```bash
 crontab -e
 # Add:
 0 * * * * /home/edu/job-scraper/run_scraper.sh
+# ATS boards (Greenhouse / Lever / Ashby), once a day:
+45 6 * * * /home/edu/job-scraper/run_scraper.sh --source ats
 ```
-`run_scraper.sh` loads `.env` (if present), activates the virtualenv, acquires a PID lock, runs `main.py`, and logs to `$LOG_DIR/cron.log`.
+`run_scraper.sh` loads `.env` (if present), activates the virtualenv, acquires a PID lock, runs
+`main.py "$@"` (its arguments are forwarded), and logs to `$LOG_DIR/cron.log`. The start, finish
+and skip lines include the arguments, e.g. `Starting scraper run (--source ats)`; runs without
+arguments log as before.
+
+LinkedIn and ATS runs share `scraper.lock`, so they never write to SQLite at the same time:
+whichever starts while the other holds the lock logs `Scraper already running (PID …),
+skipping run (…)` and exits. Schedule the ATS run away from `:00` (an hourly LinkedIn run
+usually takes several minutes; `:45` leaves room). A skipped ATS run waits for the next day,
+so check `cron.log` for `skipping run (--source ats)`. An ATS run takes ~1 min (18 boards,
+1–2 s apart), so it rarely makes the hourly run skip. Covered by `tests/test_run_scraper.py`
+(fake `main.py`, no network).
 
 The searches use `time_posted="2h"`, twice the cron interval. With `"1h"` there was no overlap,
 so a posting was missed whenever a template's next run started more than an hour after its last

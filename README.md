@@ -69,6 +69,26 @@ which are logged and skipped. To add a company, add `{"name", "ats", "slug"}` to
 
 Without `--source` (or with `--source linkedin`) `main.py` runs the LinkedIn pipeline as before.
 
+### Scheduling (cron)
+
+`run_scraper.sh` is the cron wrapper: it loads `.env`, activates the virtualenv, takes a PID
+lock (`$LOG_DIR/scraper.lock`), runs `main.py` with the arguments it was given, and appends
+everything to `$LOG_DIR/cron.log`.
+
+```bash
+crontab -e
+# LinkedIn searches + analysis, every hour:
+0 * * * * /home/edu/job-scraper/run_scraper.sh
+# ATS boards (Greenhouse / Lever / Ashby), once a day:
+45 6 * * * /home/edu/job-scraper/run_scraper.sh --source ats
+```
+
+The log lines include the arguments (`Starting scraper run (--source ats)` / `Scraper run
+finished (--source ats)`). Both kinds of run share the lock, so they never write to the
+database at the same time: a run that starts while another one holds the lock logs `Scraper
+already running (PID …), skipping run (…)` and exits. Keep the ATS run away from `:00`, when
+the hourly LinkedIn run starts; a skipped ATS run only happens again the next day.
+
 ### Run a single custom search
 ```python
 from scraper import JobScraper, SearchConfig
