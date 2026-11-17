@@ -5,7 +5,11 @@ import json
 # Bump when the matching/scoring logic changes (KeywordAnalyzer.analyze,
 # MatchResult.calculate_score), so scores made by the old logic get a new
 # scoring_version even with the same keywords.
-SCORER_VERSION = 1
+SCORER_VERSION = 2  # 2: each keyword's count capped at MAX_SCORED_MATCHES
+
+# Matches of one keyword that count toward weighted_score: presence matters,
+# repetition (keyword-stuffed or very long postings) shouldn't.
+MAX_SCORED_MATCHES = 2
 
 
 class KeywordConfig:
@@ -50,6 +54,10 @@ class KeywordConfig:
             'weights': {kw: float(self.weights.get(kw, 1.0)) for kw in self.keywords},
         }, sort_keys=True, separators=(',', ':'))
         return hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:12]
+
+    def keyword_score(self, keyword, count):
+        """Weighted contribution of one keyword: weight x min(count, MAX_SCORED_MATCHES)."""
+        return min(count, MAX_SCORED_MATCHES) * self.weights.get(keyword, 1.0)
 
     def get_keywords_string(self):
         """Get comma-separated keywords string for storage."""

@@ -79,7 +79,7 @@ class KeywordAnalyzer:
 
         # Calculate weighted score
         weighted_score = sum(
-            count * self.keyword_config.weights.get(kw, 1.0)
+            self.keyword_config.keyword_score(kw, count)
             for kw, count in keyword_matches.items()
         )
 

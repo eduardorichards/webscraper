@@ -394,6 +394,15 @@ pages (checked on two live pages on 2026-11-14; they list only Seniority level, 
 Industries). Not a parser bug; the parser still reads it if it comes back
 (`tests/test_job_criteria.py`).
 
+### Scoring
+`weighted_score` = Σ weight × min(count, `MAX_SCORED_MATCHES`) over the keywords
+(`KeywordConfig.keyword_score()`, cap 2 since `SCORER_VERSION` 2): presence matters, repetition
+doesn't. `total_matches` keeps the raw counts. Keywords in `config/keyword_settings.py` follow the
+CV (Java/Spring Boot, QA automation, AWS, AI); AWS services are weighted low (AWS 6, Lambda /
+Serverless 3, DynamoDB / ECS / S3 2) so an AWS-heavy posting can't stack them. On a local copy
+(2026-11-17) the change moved the distribution from median 11 / p90 54 / max 571 to median 12 /
+p90 53 / max 200.
+
 ### Score versioning
 `KeywordConfig.scoring_version()` = first 12 hex chars of SHA-256 over canonical JSON of
 `SCORER_VERSION`, `case_sensitive` and `{keyword: float(weight)}` for the configured keywords

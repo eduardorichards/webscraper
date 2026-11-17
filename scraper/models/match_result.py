@@ -52,7 +52,7 @@ class MatchResult:
             self.match_percentage = 0.0
 
         self.weighted_score = sum(
-            count * keyword_config.weights.get(kw, 1.0)
+            keyword_config.keyword_score(kw, count)
             for kw, count in self.keyword_matches.items()
         )
         self.scoring_version = keyword_config.scoring_version()

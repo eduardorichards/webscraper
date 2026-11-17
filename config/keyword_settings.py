@@ -12,18 +12,26 @@ USER_AGENTS = [
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:121.0) Gecko/20100101 Firefox/121.0',
 ]
 
-# Updated keywords based on your Java Backend and Automated Testing focus
+# Keywords for the current CV: Java/Spring Boot and Python backend, QA automation,
+# AWS and AI products. Matched case-insensitively on word boundaries.
 DEFAULT_KEYWORDS = [
     "software", "developer", "programming", "database", "microservices", 
     "Backend", "Java", "Spring", "Spring Boot", "SQL", "PostgreSQL", 
     "MySQL", "Git", "Github", "GitLab", "Node.js", "Angular", "Python", 
-    "JavaScript", "Typescript", "Elasticsearch", "Docker", "SQLite", 
+    "JavaScript", "TypeScript", "Elasticsearch", "Docker", "SQLite", 
     "Redis", "Graphana", "Kibana", "Monitoring", "metrics", "Cybersecurity", 
-    "Open Telemetry", "AI", "IA", "LLM", "LLms", "Automated Testing", 
+    "OpenTelemetry", "AI", "IA", "LLM", "LLms", "Automated Testing", 
     "Testing", "Automation Testing", "QA", "Architecture", "JUnit", 
     "Mockito", "Agile", "Scrum", "SDLC", "JWT", "OAuth 2.0", "Full Stack", 
     "Site Reliability Engineer", "SRE", "API", "Restful", "Devops", "Claude", "OpenAI", "Gemini", "Cursor", "Anthropic", "Agentic", "Semi", "Ssr", "Semisenior",
     "Software Developer",
+    # QA automation
+    "QA Automation", "SDET", "Playwright", "Selenium", "REST Assured", "TestNG", "Postman",
+    # AWS / cloud / CI
+    "AWS", "Lambda", "DynamoDB", "ECS", "S3", "Serverless", "Terraform", "Kubernetes",
+    "GitHub Actions", "Jenkins",
+    # AI tooling
+    "MCP", "Prompt Engineering", "Claude Code", "Copilot",
 ]
 
 # Keys must match a DEFAULT_KEYWORDS entry exactly (case-sensitive): weights are
@@ -43,15 +51,42 @@ WEIGHTED_KEYWORDS = {
     "PostgreSQL": 4,          # Specific DBs weigh more than "SQL"
     "Docker": 3,              # Essential for modern deployment
     "OAuth 2.0": 2,           # Shows security maturity
-    "Open Telemetry": 3,      # Deep backend/monitoring knowledge
+    "OpenTelemetry": 3,       # Deep backend/monitoring knowledge
     "SRE": 3,                 # Good for cross-disciplinary roles
     "SQL": 3,
     "Spring": 4,
     "AI": 2,
-    "Python": 3,
+    "Python": 5,
     "Git": 2,
     "Software Developer": 4,
     "Cybersecurity": 3,
     "SDLC": 4,
     "Full Stack": 3,
+    # QA automation
+    "QA Automation": 8,
+    "Playwright": 8,
+    "SDET": 7,
+    "REST Assured": 7,
+    "Selenium": 7,
+    "TestNG": 5,
+    "Postman": 3,
+    # AWS / cloud / CI
+    # AWS services kept low so an AWS-heavy posting can't stack them
+    "AWS": 6,
+    "Lambda": 3,
+    "Serverless": 3,
+    "DynamoDB": 2,
+    "ECS": 2,
+    "S3": 2,
+    "Terraform": 3,
+    "Kubernetes": 3,
+    "GitHub Actions": 3,
+    "Jenkins": 2,
+    # AI
+    "LLM": 7,
+    "MCP": 6,
+    "Prompt Engineering": 4,
+    "Claude Code": 4,
+    "Copilot": 2,
+    "TypeScript": 3,
 }

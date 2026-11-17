@@ -28,7 +28,8 @@ class TestScoringVersion(unittest.TestCase):
         self.assertNotEqual(base, KeywordConfig(["Java"], {"Java": 10}).scoring_version())
         self.assertNotEqual(base, KeywordConfig(["Java", "SQL"], {"Java": 10},
                                                 case_sensitive=True).scoring_version())
-        with mock.patch.object(keyword_config_module, 'SCORER_VERSION', 2):
+        with mock.patch.object(keyword_config_module, 'SCORER_VERSION',
+                               keyword_config_module.SCORER_VERSION + 1):
             self.assertNotEqual(base, KeywordConfig(["Java", "SQL"],
                                                     {"Java": 10}).scoring_version())
 
@@ -39,6 +40,15 @@ class TestScoringVersion(unittest.TestCase):
         result.keyword_matches = {"Java": 3}
         result.calculate_score(config)
         self.assertEqual(result.scoring_version, config.scoring_version())
+
+    def test_each_keyword_counts_at_most_twice(self):
+        config = KeywordConfig(["Java", "SQL", "Go"], {"Java": 10, "SQL": 3})
+        result = MatchResult("4000000001")
+        result.keyword_matches = {"Java": 7, "SQL": 1, "Go": 0}
+        result.calculate_score(config)
+        self.assertEqual(result.weighted_score, 2 * 10 + 1 * 3)
+        self.assertEqual(result.total_matches, 8)  # raw counts, uncapped
+        self.assertEqual(result.matched_keywords, ["Java", "SQL"])
 
 
 class _DbTest(unittest.TestCase):
